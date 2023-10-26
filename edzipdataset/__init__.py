@@ -31,7 +31,7 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
 
 T = TypeVar('T')
 
-class EDZipDataset(Dataset,Generic[T]):
+class EDZipDataset(Dataset[T]):
     """A dataset class for reading data from a zip file with an external sqlite3 directory."""
 
     def __init__(self, zip: IOBase, con: sqlite3.Connection, transform: Callable[[edzip.EDZipFile,int,ZipInfo], T] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Union[Sequence[str],None] = None):
@@ -83,4 +83,71 @@ class S3HostedEDZipDataset(EDZipDataset[T]):
         super().__init__(zf, sqlite3.connect(sqfpath), *args, **kwargs)
 
 
-__all__ = ["EDZipDataset","S3HostedEDZipDataset","get_s3_client"]
+T = TypeVar('T')
+
+class LinearSubset(Dataset[T]):
+    r"""
+    Subset of a dataset at specified indices.
+
+    Args:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole set selected for subset
+    """
+    dataset: Dataset[T]
+    start: int
+    end: int
+
+    def __init__(self, dataset: Dataset[T], start: int = 0, end: Union[int,None] = None) -> None:
+        self.dataset = dataset
+        self.start = start
+        if end is not None:
+            self.end = end
+        else: 
+            self.end = len(self.dataset)
+
+    def __getitem__(self, idx):
+        return self.dataset[self.start + idx]
+
+    def __getitems__(self, indices: list[int]) -> list[T]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__([self.start + idx for idx in indices])  # type: ignore[attr-defined]
+        else:
+            return [self.dataset[self.start + idx] for idx in indices]
+
+    def __len__(self):
+        return self.end - self.start
+
+
+T2 = TypeVar('T2')
+
+class TransformedDataset(Dataset[T2]):
+    r"""Create a transformed dataset by applying a transform function to all samples.
+
+    Args:
+        dataset (Dataset[T]): The underlying dataset
+        transform (Callable[T,T2]): The transformation function to be applied to each sample
+    """
+    dataset: Dataset[T]
+    transform: Callable[[T2],T]
+
+    def __init__(self, dataset: Dataset[T], transform: Callable[[T2],T]) -> None:
+        self.dataset = dataset
+        self.transform = transform
+
+    def __getitem__(self, idx):
+        return self.transform(self.dataset[idx])
+
+    def __getitems__(self, indices: list[int]) -> list[T]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return [self.transform(item) for item in self.dataset.__getitems__(indices)]  # type: ignore[attr-defined]
+        else:
+            return [self.transform(self.dataset[idx]) for idx in indices]
+
+    def __len__(self):
+        return len(self.dataset)
+
+__all__ = ["EDZipDataset","S3HostedEDZipDataset","LinearSubset","TransformedDataset","get_s3_client"]

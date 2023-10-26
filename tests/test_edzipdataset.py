@@ -1,18 +1,13 @@
 from io import BytesIO, IOBase
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import shutil
 from zipfile import ZipFile
 from edzip import create_sqlite_directory_from_zip
-from hereutil import here
 
 from edzipdataset import S3HostedEDZipDataset
-
-def mock_responses(responses, default_response=None):
-  return lambda input: responses[input] if input in responses else default_response
-
 class TestS3HostedEDZipDataset(unittest.TestCase):
     def setUp(self):
         zfbuffer = BytesIO()
