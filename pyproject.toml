@@ -1,9 +1,16 @@
 [tool.poetry]
 name = "edzipdataset"
-version = "0.1.0"
+version = "0.1.1"
 description = "EDZip-based, S3-hosted pytorch dataset"
 authors = ["Eetu Mäkelä <eetu.makela@iki.fi>"]
 readme = "README.md"
+license = "MIT"
+repository = "https://github.com/hsci-r/edzipdataset"
+keywords = [
+    "zip-files",
+    "pytorch",
+    "dataset"
+]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"

@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import BytesIO, IOBase
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -31,10 +31,21 @@ class TestS3HostedEDZipDataset(unittest.TestCase):
         self.patcher.stop()
 
     def test_s3hostededzipdataset(self):
-        ds = S3HostedEDZipDataset("s3://foo/test.zip", self.tmpdir)
-        self.assertIsInstance(ds, S3HostedEDZipDataset)
+        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir)
         self.assertEqual(len(ds), 3)
         self.assertEqual(ds[0].read(), b"Hello, world!")
         self.assertEqual(ds[1].read(), b"Hello again!")
         self.assertEqual(ds[2].read(), b"Goodbye!")
         self.assertEqual(list(map(lambda x: x.read(), ds.__getitems__([0,2]))), [b"Hello, world!", b"Goodbye!"])
+
+    def test_s3hostededzipdataset_limit(self):
+        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir, limit=["test.txt", "test3.txt"])
+        self.assertEqual(len(ds), 2)
+        self.assertEqual(ds[0].read(), b"Hello, world!")
+        self.assertEqual(ds[1].read(), b"Goodbye!")
+
+    def test_s3hostededzipdataset_transform(self):
+        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir, transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
+        self.assertEqual(len(ds), 2)
+        self.assertEqual(ds[0], b"Hello, world!0")
+        self.assertEqual(ds[1], b"Goodbye!1")

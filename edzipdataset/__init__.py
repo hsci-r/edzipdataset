@@ -1,6 +1,7 @@
 from io import IOBase
 import os
-from typing import Union
+from typing import Any, Callable, Generic, Sequence, TypeVar, Union
+from zipfile import ZipInfo
 import edzip
 import smart_open
 import yaml
@@ -28,33 +29,40 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
     return s3_client
 
 
-class EDZipDataset(Dataset):
+T = TypeVar('T')
+
+class EDZipDataset(Dataset,Generic[T]):
     """A dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: IOBase, con: sqlite3.Connection):
+    def __init__(self, zip: IOBase, con: sqlite3.Connection, transform: Callable[[edzip.EDZipFile,int,ZipInfo], T] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Union[Sequence[str],None] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
                 zip (IOBase): A file-like object representing the zip file.
                 con (sqlite3.Connection): A connection to the SQLite database containing the external directory.
+                limit (Sequence[str]): An optional list of filenames to limit the dataset to.
         """
         self.edzip = edzip.EDZipFile(zip, con)
-        self.infolist = self.edzip.infolist()
+        if limit is not None:
+            self.infolist = list(self.edzip.getinfos(limit))
+        else:
+            self.infolist = self.edzip.infolist()
+        self.transform = transform
         
     def __len__(self):
         return len(self.infolist)
     
-    def __getitem__(self, idx: int) -> IOBase:
-        return self.edzip.open(self.infolist[idx])
+    def __getitem__(self, idx: int) -> T:
+        return self.transform(self.edzip, idx, self.infolist[idx])
 
-    def __getitems__(self, idxs: list[int]) -> list[IOBase]:
-        return [self.edzip.open(info) for info in self.edzip.getinfos(idxs)]
+    def __getitems__(self, idxs: list[int]) -> list[T]:
+        return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))]
 
 
-class S3HostedEDZipDataset(EDZipDataset):
+class S3HostedEDZipDataset(EDZipDataset[T]):
     """A dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip_url:str, sqlite_dir: str, s3_client = None):
+    def __init__(self, zip_url:str, sqlite_dir: str, s3_client = None, *args, **kwargs):
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
@@ -72,7 +80,7 @@ class S3HostedEDZipDataset(EDZipDataset):
                 os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
                 with open(sqfpath, "wb") as df:
                     shutil.copyfileobj(sf, df)
-        super().__init__(zf, sqlite3.connect(sqfpath))
+        super().__init__(zf, sqlite3.connect(sqfpath), *args, **kwargs)
 
 
 __all__ = ["EDZipDataset","S3HostedEDZipDataset","get_s3_client"]
