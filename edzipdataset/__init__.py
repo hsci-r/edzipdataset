@@ -115,7 +115,6 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             if s3_credentials_yaml_file is None:
                 raise ValueError("s3_credentials_yaml_file must be provided if the sqlite3 file does not already exist")
             with smart_open.open(f"{zip_url}.offsets.sqlite3", "rb", transport_params=dict(client=s3_client())) as sf:
-                print(sf)
                 os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
                 with open(sqfpath, "wb") as df:
                     shutil.copyfileobj(sf, df)
