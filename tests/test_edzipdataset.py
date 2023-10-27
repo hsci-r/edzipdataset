@@ -7,8 +7,8 @@ import shutil
 from zipfile import ZipFile
 from edzip import create_sqlite_directory_from_zip
 
-from edzipdataset import S3HostedEDZipDataset
-class TestS3HostedEDZipDataset(unittest.TestCase):
+from edzipdataset import S3HostedEDZipMapDataset
+class TestS3HostedEDZipMapDataset(unittest.TestCase):
     def setUp(self):
         zfbuffer = BytesIO()
         zfbuffer.name = "test.zip"
@@ -26,7 +26,7 @@ class TestS3HostedEDZipDataset(unittest.TestCase):
         self.patcher.stop()
 
     def test_s3hostededzipdataset(self):
-        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir)
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir)
         self.assertEqual(len(ds), 3)
         self.assertEqual(ds[0].read(), b"Hello, world!")
         self.assertEqual(ds[1].read(), b"Hello again!")
@@ -34,13 +34,13 @@ class TestS3HostedEDZipDataset(unittest.TestCase):
         self.assertEqual(list(map(lambda x: x.read(), ds.__getitems__([0,2]))), [b"Hello, world!", b"Goodbye!"])
 
     def test_s3hostededzipdataset_limit(self):
-        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir, limit=["test.txt", "test3.txt"])
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, limit=["test.txt", "test3.txt"])
         self.assertEqual(len(ds), 2)
         self.assertEqual(ds[0].read(), b"Hello, world!")
         self.assertEqual(ds[1].read(), b"Goodbye!")
 
     def test_s3hostededzipdataset_transform(self):
-        ds = S3HostedEDZipDataset[IOBase]("s3://foo/test.zip", self.tmpdir, transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
         self.assertEqual(len(ds), 2)
         self.assertEqual(ds[0], b"Hello, world!0")
         self.assertEqual(ds[1], b"Goodbye!1")

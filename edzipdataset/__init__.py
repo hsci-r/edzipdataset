@@ -1,9 +1,11 @@
 from io import IOBase
 import os
-from typing import Any, Callable, Generic, Sequence, TypeVar, Union
+import random
+from typing import Any, Callable, Generic, Optional, Sequence, TypeVar, Union
 from zipfile import ZipInfo
 import edzip
 import smart_open
+import torch
 import yaml
 import boto3
 import sqlite3
@@ -29,12 +31,12 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
     return s3_client
 
 
-T = TypeVar('T')
+T_co = TypeVar('T_co', covariant=True)
 
-class EDZipDataset(Dataset[T]):
-    """A dataset class for reading data from a zip file with an external sqlite3 directory."""
+class EDZipMapDataset(Dataset[T_co]):
+    """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: IOBase, con: sqlite3.Connection, transform: Callable[[edzip.EDZipFile,int,ZipInfo], T] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Union[Sequence[str],None] = None):
+    def __init__(self, zip: IOBase, con: sqlite3.Connection, transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
@@ -52,15 +54,15 @@ class EDZipDataset(Dataset[T]):
     def __len__(self):
         return len(self.infolist)
     
-    def __getitem__(self, idx: int) -> T:
+    def __getitem__(self, idx: int) -> T_co:
         return self.transform(self.edzip, idx, self.infolist[idx])
 
-    def __getitems__(self, idxs: list[int]) -> list[T]:
+    def __getitems__(self, idxs: list[int]) -> list[T_co]:
         return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))]
 
 
-class S3HostedEDZipDataset(EDZipDataset[T]):
-    """A dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
+class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
+    """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
     def __init__(self, zip_url:str, sqlite_dir: str, s3_client = None, *args, **kwargs):
         """Creates a new instance of the S3HostedEDZipDataset class.
@@ -83,32 +85,30 @@ class S3HostedEDZipDataset(EDZipDataset[T]):
         super().__init__(zf, sqlite3.connect(sqfpath), *args, **kwargs)
 
 
-T = TypeVar('T')
-
-class LinearSubset(Dataset[T]):
+class LinearMapSubset(Dataset[T_co]):
     r"""
-    Subset of a dataset at specified indices.
+    Slice a map dataset at specified indices.
 
     Args:
-        dataset (Dataset): The whole Dataset
+        dataset (Dataset[T_co]): The whole map dataset
         indices (sequence): Indices in the whole set selected for subset
     """
-    dataset: Dataset[T]
+    dataset: Dataset[T_co]
     start: int
     end: int
 
-    def __init__(self, dataset: Dataset[T], start: int = 0, end: Union[int,None] = None) -> None:
+    def __init__(self, dataset: Dataset[T_co], start: int = 0, end: Optional[int] = None) -> None:
         self.dataset = dataset
         self.start = start
         if end is not None:
             self.end = end
         else: 
-            self.end = len(self.dataset)
+            self.end = len(self.dataset) # type: ignore
 
     def __getitem__(self, idx):
         return self.dataset[self.start + idx]
 
-    def __getitems__(self, indices: list[int]) -> list[T]:
+    def __getitems__(self, indices: list[int]) -> list[T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
@@ -120,26 +120,24 @@ class LinearSubset(Dataset[T]):
         return self.end - self.start
 
 
-T2 = TypeVar('T2')
+T2_co = TypeVar('T2_co', covariant=True)
 
-class TransformedDataset(Dataset[T2]):
-    r"""Create a transformed dataset by applying a transform function to all samples.
+class TransformedMapDataset(Dataset[T2_co]):
+    r"""Create a transformed map dataset by applying a transform function to all samples.
 
     Args:
-        dataset (Dataset[T]): The underlying dataset
-        transform (Callable[T,T2]): The transformation function to be applied to each sample
+        dataset (Dataset[T_co]): The underlying map dataset
+        transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
     """
-    dataset: Dataset[T]
-    transform: Callable[[T2],T]
 
-    def __init__(self, dataset: Dataset[T], transform: Callable[[T2],T]) -> None:
+    def __init__(self, dataset: Dataset[T_co], transform: Callable[[T_co],T2_co]) -> None:
         self.dataset = dataset
         self.transform = transform
 
     def __getitem__(self, idx):
         return self.transform(self.dataset[idx])
 
-    def __getitems__(self, indices: list[int]) -> list[T]:
+    def __getitems__(self, indices: list[int]) -> list[T2_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
@@ -148,6 +146,75 @@ class TransformedDataset(Dataset[T2]):
             return [self.transform(self.dataset[idx]) for idx in indices]
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset) # type: ignore
 
-__all__ = ["EDZipDataset","S3HostedEDZipDataset","LinearSubset","TransformedDataset","get_s3_client"]
+
+class ShuffledMapDataset(Dataset[T_co]):
+    r"""
+    Shuffle the input map dataset via its indices.
+
+    When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
+    set up random seed are different based on :attr:`num_workers`.
+
+    For single-process mode (:attr:`num_workers == 0`), the random seed is set before
+    the :class:`~torch.utils.data.DataLoader` in the main process. For multi-process
+    mode (:attr:`num_worker > 0`), ``worker_init_fn`` is used to set up a random seed
+    for each worker process.
+
+    Args:
+        dataset (Dataset): Map dataset being shuffled
+        indices (list[Any]): a list of indices of the MapDataPipe. If not provided, we assume it uses 0-based indexing
+    """
+    dataset: Dataset[T_co]
+    _enabled: bool
+    _seed: Optional[int]
+    _rng: random.Random
+
+    def __init__(self, dataset: Dataset[T_co], indices: Optional[list[Any]] = None) -> None:
+        self.dataset = dataset
+        self._enabled = True
+        self._seed = None
+        self._rng = random.Random()
+        self.indices = list(range(len(dataset))) if indices is None else indices # type: ignore
+        self._shuffled_indices: list = self.indices
+
+    def set_shuffle(self, shuffle=True):
+        self._enabled = shuffle
+        return self
+
+    def set_seed(self, seed: int):
+        self._seed = seed
+        return self
+    
+    def __getitem__(self, idx):
+        if not self._enabled:
+            return self.dataset[idx]
+        else:
+            return self.dataset[self._shuffled_indices[idx]]
+
+    def __getitems__(self, indices: list[int]) -> list[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if not self._enabled:
+            if callable(getattr(self.dataset, "__getitems__", None)):
+                return self.dataset.__getitems__(indices)  # type: ignore[attr-defined]
+            else:
+                return [self.dataset[idx] for idx in indices]
+        else:
+            if callable(getattr(self.dataset, "__getitems__", None)):
+                return self.dataset.__getitems__([self._shuffled_indices[idx] for idx in indices])  # type: ignore[attr-defined]
+            else:
+                return [self.dataset[self._shuffled_indices[idx]] for idx in indices]
+        
+    def reset(self) -> None:
+        if self._enabled and self._seed is None:
+            self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
+        self._rng.seed(self._seed)
+        self._seed = None
+        self._shuffled_indices = self._rng.sample(self.indices, len(self.indices))
+
+    def __len__(self) -> int:
+        return len(self.dataset) # type: ignore
+
+
+__all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client"]

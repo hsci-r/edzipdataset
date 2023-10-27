@@ -2,14 +2,14 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset import TransformedDataset
+from edzipdataset import TransformedMapDataset
 
-class TestLinearSubset(unittest.TestCase):
+class TestTransformedMapDataset(unittest.TestCase):
     def setUp(self):
         self.dataset = TensorDataset(torch.arange(3))
 
     def test_linearsubset(self):
-        ds = TransformedDataset(self.dataset, lambda x: x[0]+2)
+        ds = TransformedMapDataset(self.dataset, lambda x: x[0]+2)
         self.assertEqual(len(ds), 3)
         self.assertEqual(ds[0], 2)
         self.assertEqual(ds[1], 3)
