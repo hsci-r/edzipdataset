@@ -6,6 +6,8 @@ from unittest.mock import patch
 import shutil
 from zipfile import ZipFile
 from edzip import create_sqlite_directory_from_zip
+import boto3
+import pickle
 
 from edzipdataset import S3HostedEDZipMapDataset
 class TestS3HostedEDZipMapDataset(unittest.TestCase):
@@ -44,3 +46,15 @@ class TestS3HostedEDZipMapDataset(unittest.TestCase):
         self.assertEqual(len(ds), 2)
         self.assertEqual(ds[0], b"Hello, world!0")
         self.assertEqual(ds[1], b"Goodbye!1")
+
+    def test_pickling_s3hosteedzipdataset(self):
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
+        self.assertEqual(len(ds), 2)
+        self.assertEqual(ds[0], b"Hello, world!0")
+        self.assertEqual(ds[1], b"Goodbye!1")
+        bytes = pickle.dumps(ds)
+        ds2 = pickle.loads(bytes)
+        self.assertEqual(len(ds2), 2)
+        self.assertEqual(ds2[0], b"Hello, world!0")
+        self.assertEqual(ds2[1], b"Goodbye!1")
+

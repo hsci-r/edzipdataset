@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 import shutil
 import yaml
 import boto3
+import dill
 
 def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
     """Returns an S3 client configured to use the credentials in the provided YAML file.
@@ -36,7 +37,7 @@ T_co = TypeVar('T_co', covariant=True)
 class EDZipMapDataset(Dataset[T_co]):
     """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: IOBase, con: sqlite3.Connection, transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Optional[Sequence[str]] = None):
+    def __init__(self, zip: Callable[[],IOBase], con: Callable[[],sqlite3.Connection], transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
@@ -44,12 +45,27 @@ class EDZipMapDataset(Dataset[T_co]):
                 con (sqlite3.Connection): A connection to the SQLite database containing the external directory.
                 limit (Sequence[str]): An optional list of filenames to limit the dataset to.
         """
-        self.edzip = edzip.EDZipFile(zip, con)
-        if limit is not None:
-            self.infolist = list(self.edzip.getinfos(limit))
-        else:
-            self.infolist = self.edzip.infolist()
+        self.zip = zip
+        self.con = con
         self.transform = transform
+        self.limit = limit
+        self._edzip = None
+        self._infolist = None
+
+    @property
+    def edzip(self) -> edzip.EDZipFile:
+        if self._edzip is None:
+            self._edzip = edzip.EDZipFile(self.zip(), self.con())
+        return self._edzip
+    
+    @property
+    def infolist(self) -> Sequence[ZipInfo]:
+        if self._infolist is None:
+            if self.limit is not None:
+                self._infolist = list(self.edzip.getinfos(self.limit))
+            else:
+                self._infolist = self.edzip.infolist()
+        return self._infolist
         
     def __len__(self):
         return len(self.infolist)
@@ -59,12 +75,29 @@ class EDZipMapDataset(Dataset[T_co]):
 
     def __getitems__(self, idxs: list[int]) -> list[T_co]:
         return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))]
-
+    
+    def __setstate__(self, state):
+        (
+            self.zip, 
+            self.con, 
+            self.transform, 
+            self.limit) = dill.loads(state)
+        self._edzip = None
+        self._infolist = None
+    
+    def __getstate__(self) -> object:
+        return dill.dumps((
+            self.zip, 
+            self.con, 
+            self.transform, 
+            self.limit
+        ))
+    
 
 class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip_url:str, sqlite_dir: str, s3_client = None, *args, **kwargs):
+    def __init__(self, zip_url:str, sqlite_dir: str, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
@@ -72,17 +105,22 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
                 sqlite_dir (str): The directory containing the sqlite3 database file ().
                 s3_client (boto3.client): The S3 client object to use.
         """
-        zf = smart_open.open(zip_url, "rb", transport_params=dict(client=s3_client))
-        sqfname = zf.name+".offsets.sqlite3"
-        sqfpath = f"{sqlite_dir}/{sqfname}"        
-        if not os.path.exists(sqfpath):
-            if s3_client is None:
-                raise ValueError("s3_client must be provided if the sqlite3 file does not already exist")
-            with smart_open.open(f"{zip_url}.offsets.sqlite3", "rb", transport_params=dict(client=s3_client)) as sf:
-                os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
-                with open(sqfpath, "wb") as df:
-                    shutil.copyfileobj(sf, df)
-        super().__init__(zf, sqlite3.connect(sqfpath), *args, **kwargs)
+        def s3_client():
+            return get_s3_client(s3_credentials_yaml_file) if s3_credentials_yaml_file is not None else None
+        def zip():
+            return smart_open.open(zip_url, "rb", transport_params=dict(client=s3_client()))
+        def sqlite():
+            sqfname = os.path.basename(zip_url)+".offsets.sqlite3"
+            sqfpath = f"{sqlite_dir}/{sqfname}"        
+            if not os.path.exists(sqfpath):
+                if s3_credentials_yaml_file is None:
+                    raise ValueError("s3_credentials_yaml_file must be provided if the sqlite3 file does not already exist")
+                with smart_open.open(f"{zip_url}.offsets.sqlite3", "rb", transport_params=dict(client=s3_client())) as sf:
+                    os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
+                    with open(sqfpath, "wb") as df:
+                        shutil.copyfileobj(sf, df)
+            return sqlite3.connect(sqfpath)
+        super().__init__(zip=zip,con=sqlite, *args, **kwargs)
 
 
 class LinearMapSubset(Dataset[T_co]):
@@ -215,6 +253,29 @@ class ShuffledMapDataset(Dataset[T_co]):
 
     def __len__(self) -> int:
         return len(self.dataset) # type: ignore
+    
+    def __getstate__(self):
+        state = (
+            self.dataset,
+            self.indices,
+            self._enabled,
+            self._seed,
+            self._rng.getstate(),
+            self._shuffled_indices,
+        )
+        return state
 
+    def __setstate__(self, state):
+        (
+            self.dataset,
+            self.indices,
+            self._enabled,
+            self._seed,
+            rng_state,
+            self._shuffled_indices,
+        ) = state
+        self._rng = random.Random()
+        self._rng.setstate(rng_state)
+    
 
 __all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client"]
