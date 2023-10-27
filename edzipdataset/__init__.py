@@ -185,6 +185,19 @@ class TransformedMapDataset(Dataset[T2_co]):
 
     def __len__(self):
         return len(self.dataset) # type: ignore
+    
+    def __setstate__(self, state):
+        (
+            self.dataset, 
+            self.transform,
+        ) = dill.loads(state)
+    
+    def __getstate__(self) -> object:
+        return dill.dumps((
+            self.dataset,
+            self.transform,
+        ))
+    
 
 
 class ShuffledMapDataset(Dataset[T_co]):
