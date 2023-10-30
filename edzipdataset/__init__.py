@@ -219,11 +219,13 @@ class ShuffledMapDataset(Dataset[T_co]):
 
     def __init__(self, dataset: Dataset[T_co], seed: Optional[int] = None, indices: Optional[list[Any]] = None) -> None:
         self.dataset = dataset
-        rng = random.Random()
-        rng.seed(seed)
         if indices is None:
-            indices = list(range(len(dataset))) # type: ignore
-        self._shuffled_indices: list = rng.sample(indices, len(indices))
+            rng = torch.Generator()
+            self._shuffled_indices = torch.randperm(len(dataset), generator=rng).tolist() # type: ignore
+        else:
+            rng = random.Random()
+            rng.seed(seed)
+            self._shuffled_indices: list = rng.sample(indices, len(indices))
 
     def __getitem__(self, idx):
         return self.dataset[self._shuffled_indices[idx]]
