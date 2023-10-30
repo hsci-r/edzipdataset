@@ -28,7 +28,6 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
         credentials = yaml.safe_load(f)
     session = boto3.Session()
     s3_client = session.client(service_name='s3', **credentials)
-    print(credentials)
     return s3_client
 
 
