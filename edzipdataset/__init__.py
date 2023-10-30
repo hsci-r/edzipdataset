@@ -217,15 +217,20 @@ class ShuffledMapDataset(Dataset[T_co]):
     """
     dataset: Dataset[T_co]
 
-    def __init__(self, dataset: Dataset[T_co], seed: Optional[int] = None, indices: Optional[list[Any]] = None) -> None:
+    def __init__(self, dataset: Dataset[T_co], seed: int, indices: Optional[list[Any]] = None) -> None:
         self.dataset = dataset
-        if indices is None:
-            rng = torch.Generator()
-            self._shuffled_indices = torch.randperm(len(dataset), generator=rng).tolist() # type: ignore
+        self.seed = seed
+        self.indices = indices
+        self._shuffle()
+
+    def _shuffle(self):
+        if self.indices is None:
+            rng = torch.Generator().manual_seed(self.seed)
+            self._shuffled_indices = torch.randperm(len(self.dataset), generator=rng).tolist() # type: ignore
         else:
             rng = random.Random()
-            rng.seed(seed)
-            self._shuffled_indices: list = rng.sample(indices, len(indices))
+            rng.seed(self.seed)
+            self._shuffled_indices: list = rng.sample(self.indices, len(self.indices))
 
     def __getitem__(self, idx):
         return self.dataset[self._shuffled_indices[idx]]
@@ -244,15 +249,18 @@ class ShuffledMapDataset(Dataset[T_co]):
     def __getstate__(self):
         state = (
             self.dataset,
-            self._shuffled_indices,
+            self.indices,
+            self.seed,
         )
         return state
 
     def __setstate__(self, state):
         (
             self.dataset,
-            self._shuffled_indices,
+            self.indices,
+            self.seed,
         ) = state
+        self._shuffle()
     
 
 __all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client","ensure_sqlite_database_exists"]
