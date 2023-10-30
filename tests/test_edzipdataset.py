@@ -4,11 +4,14 @@ import unittest
 from unittest.mock import patch
 
 import shutil
-from zipfile import ZipFile
-from edzip import create_sqlite_directory_from_zip
+from zipfile import ZipFile, ZipInfo
+from edzip import EDZipFile, create_sqlite_directory_from_zip
 import pickle
 
 from edzipdataset import S3HostedEDZipMapDataset
+
+def _transform(edzip: EDZipFile,idx: int,zinfo: ZipInfo): 
+    return edzip.open(zinfo).read()+str(idx).encode()
 
 class TestS3HostedEDZipMapDataset(unittest.TestCase):
     def setUp(self):
@@ -53,13 +56,13 @@ class TestS3HostedEDZipMapDataset(unittest.TestCase):
         self.assertEqual(ds[1].read(), b"Goodbye!")
 
     def test_s3hostededzipdataset_transform(self):
-        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, s3_credentials_yaml_file="", transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, s3_credentials_yaml_file="", transform=_transform, limit=["test.txt", "test3.txt"])
         self.assertEqual(len(ds), 2)
         self.assertEqual(ds[0], b"Hello, world!0")
         self.assertEqual(ds[1], b"Goodbye!1")
 
     def test_pickling_s3hosteedzipdataset(self):
-        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, s3_credentials_yaml_file="", transform=lambda edzip,idx,zinfo: edzip.open(zinfo).read()+str(idx).encode(), limit=["test.txt", "test3.txt"])
+        ds = S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, s3_credentials_yaml_file="", transform=_transform, limit=["test.txt", "test3.txt"])
         self.assertEqual(len(ds), 2)
         self.assertEqual(ds[0], b"Hello, world!0")
         self.assertEqual(ds[1], b"Goodbye!1")

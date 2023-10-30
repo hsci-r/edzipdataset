@@ -13,15 +13,17 @@ from torch.utils.data import Dataset
 import shutil
 import yaml
 import boto3
-import dill
 
 
 T_co = TypeVar('T_co', covariant=True)
 
+def open_transform(edzip: edzip.EDZipFile, idx: int, zinfo: ZipInfo) -> IOBase:
+    return edzip.open(zinfo)
+
 class EDZipMapDataset(Dataset[T_co]):
     """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: Callable[[],IOBase], con: Callable[[],sqlite3.Connection], transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = lambda edzip,idx,zinfo: edzip.open(zinfo), limit: Optional[Sequence[str]] = None):
+    def __init__(self, zip: Callable[...,IOBase], zip_args: list[Any], con: Callable[...,sqlite3.Connection], con_args: list[Any], transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = open_transform, limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
@@ -30,7 +32,9 @@ class EDZipMapDataset(Dataset[T_co]):
                 limit (Sequence[str]): An optional list of filenames to limit the dataset to.
         """
         self.zip = zip
+        self.zip_args = zip_args
         self.con = con
+        self.con_args = con_args
         self.transform = transform
         self.limit = limit
         self._edzip = None
@@ -39,7 +43,7 @@ class EDZipMapDataset(Dataset[T_co]):
     @property
     def edzip(self) -> edzip.EDZipFile:
         if self._edzip is None:
-            self._edzip = edzip.EDZipFile(self.zip(), self.con())
+            self._edzip = edzip.EDZipFile(self.zip(*self.zip_args), self.con(*self.con_args))
         return self._edzip
     
     @property
@@ -62,20 +66,24 @@ class EDZipMapDataset(Dataset[T_co]):
     
     def __setstate__(self, state):
         (
-            self.zip, 
+            self.zip,
+            self.zip_args, 
             self.con, 
+            self.con_args,
             self.transform, 
-            self.limit) = dill.loads(state)
+            self.limit) = state
         self._edzip = None
         self._infolist = None
     
     def __getstate__(self) -> object:
-        return dill.dumps((
+        return (
             self.zip, 
+            self.zip_args,
             self.con, 
+            self.con_args,
             self.transform, 
             self.limit
-        ))
+        )
     
 
 def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
@@ -107,6 +115,12 @@ def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, s3_credentials_
                 shutil.copyfileobj(sf, df) # type: ignore
 
 
+def open_s3_zip(zip_url: str, s3_credentials_yaml_file: str):
+    return smart_open.open(zip_url, "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file)))
+
+def open_sqlite(sqlite_file: str):
+    return sqlite3.connect(sqlite_file)
+
 class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
@@ -124,8 +138,10 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         s3_client = lambda: get_s3_client(s3_credentials_yaml_file) if s3_credentials_yaml_file is not None else None
         ensure_sqlite_database_exists(zip_url, sqlite_dir, s3_credentials_yaml_file)
         super().__init__(
-            zip=lambda: smart_open.open(zip_url, "rb", transport_params=dict(client=s3_client())), 
-            con=lambda: sqlite3.connect(_derive_sqlite_file_path(zip_url, sqlite_dir)), 
+            zip=open_s3_zip,  # type: ignore
+            zip_args=[zip_url,s3_credentials_yaml_file], 
+            con=open_sqlite,
+            con_args=[_derive_sqlite_file_path(zip_url, sqlite_dir)], 
             *args, **kwargs)
 
 
@@ -196,13 +212,13 @@ class TransformedMapDataset(Dataset[T2_co]):
         (
             self.dataset, 
             self.transform,
-        ) = dill.loads(state)
+        ) = state
     
     def __getstate__(self) -> object:
-        return dill.dumps((
+        return (
             self.dataset,
             self.transform,
-        ))
+        )
     
 
 

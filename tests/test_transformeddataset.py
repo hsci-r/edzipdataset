@@ -5,6 +5,9 @@ from torch.utils.data import TensorDataset
 from edzipdataset import TransformedMapDataset
 import pickle
 
+def _transform(x):
+    return x[0]+2
+
 class TestTransformedMapDataset(unittest.TestCase):
     def setUp(self):
         self.dataset = TensorDataset(torch.arange(3))
@@ -17,8 +20,10 @@ class TestTransformedMapDataset(unittest.TestCase):
         self.assertEqual(ds[2], 4)
         self.assertEqual(ds.__getitems__([0,2]), [2,4])
 
-    def test_shuffleddataset_pickling(self):
-        ds = TransformedMapDataset(self.dataset, lambda x: x[0]+2)
+
+
+    def test_transformeddataset_pickling(self):
+        ds = TransformedMapDataset(self.dataset, _transform)
         self.assertEqual(len(ds), 3)
         self.assertEqual(ds[0], 2)
         self.assertEqual(ds[1], 3)
