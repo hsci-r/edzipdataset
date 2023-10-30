@@ -204,76 +204,38 @@ class ShuffledMapDataset(Dataset[T_co]):
     r"""
     Shuffle the input map dataset via its indices.
 
-    When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
-    set up random seed are different based on :attr:`num_workers`.
-
-    For single-process mode (:attr:`num_workers == 0`), the random seed is set before
-    the :class:`~torch.utils.data.DataLoader` in the main process. For multi-process
-    mode (:attr:`num_worker > 0`), ``worker_init_fn`` is used to set up a random seed
-    for each worker process.
-
     Args:
         dataset (Dataset): Map dataset being shuffled
-        indices (list[Any]): a list of indices of the MapDataPipe. If not provided, we assume it uses 0-based indexing
+        seed: (int, optional): The seed to be used for shuffling. If not provided, the current time is used.
+        indices (list[Any]): a list of indices for the parent Dataset. If not provided, we assume it uses 0-based indexing
     """
     dataset: Dataset[T_co]
-    _enabled: bool
-    _seed: Optional[int]
-    _rng: random.Random
 
-    def __init__(self, dataset: Dataset[T_co], indices: Optional[list[Any]] = None) -> None:
+    def __init__(self, dataset: Dataset[T_co], seed: Optional[int] = None, indices: Optional[list[Any]] = None) -> None:
         self.dataset = dataset
-        self._enabled = True
-        self._seed = None
-        self._rng = random.Random()
-        self.indices = list(range(len(dataset))) if indices is None else indices # type: ignore
-        self._shuffled_indices: list = self.indices
+        rng = random.Random()
+        rng.seed(seed)
+        if indices is None:
+            indices = list(range(len(dataset))) # type: ignore
+        self._shuffled_indices: list = rng.sample(indices, len(indices))
 
-    def set_shuffle(self, shuffle=True):
-        self._enabled = shuffle
-        return self
-
-    def set_seed(self, seed: int):
-        self._seed = seed
-        return self
-    
     def __getitem__(self, idx):
-        if not self._enabled:
-            return self.dataset[idx]
-        else:
-            return self.dataset[self._shuffled_indices[idx]]
+        return self.dataset[self._shuffled_indices[idx]]
 
     def __getitems__(self, indices: list[int]) -> list[T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
-        if not self._enabled:
-            if callable(getattr(self.dataset, "__getitems__", None)):
-                return self.dataset.__getitems__(indices)  # type: ignore[attr-defined]
-            else:
-                return [self.dataset[idx] for idx in indices]
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__([self._shuffled_indices[idx] for idx in indices])  # type: ignore[attr-defined]
         else:
-            if callable(getattr(self.dataset, "__getitems__", None)):
-                return self.dataset.__getitems__([self._shuffled_indices[idx] for idx in indices])  # type: ignore[attr-defined]
-            else:
-                return [self.dataset[self._shuffled_indices[idx]] for idx in indices]
+            return [self.dataset[self._shuffled_indices[idx]] for idx in indices]
         
-    def reset(self) -> None:
-        if self._enabled and self._seed is None:
-            self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
-        self._rng.seed(self._seed)
-        self._seed = None
-        self._shuffled_indices = self._rng.sample(self.indices, len(self.indices))
-
     def __len__(self) -> int:
         return len(self.dataset) # type: ignore
     
     def __getstate__(self):
         state = (
             self.dataset,
-            self.indices,
-            self._enabled,
-            self._seed,
-            self._rng.getstate(),
             self._shuffled_indices,
         )
         return state
@@ -281,14 +243,8 @@ class ShuffledMapDataset(Dataset[T_co]):
     def __setstate__(self, state):
         (
             self.dataset,
-            self.indices,
-            self._enabled,
-            self._seed,
-            rng_state,
             self._shuffled_indices,
         ) = state
-        self._rng = random.Random()
-        self._rng.setstate(rng_state)
     
 
 __all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client"]
