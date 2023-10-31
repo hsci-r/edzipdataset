@@ -112,8 +112,12 @@ def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, s3_credentials_
             raise ValueError("s3_credentials_yaml_file must be provided if the sqlite3 file does not already exist")
         with smart_open.open(f"{zip_url}.offsets.sqlite3", "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file))) as sf:
             os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
-            with open(sqfpath, "wb") as df:
-                shutil.copyfileobj(sf, df) # type: ignore
+            try:
+                with open(sqfpath, "wb") as df:
+                    shutil.copyfileobj(sf, df) # type: ignore
+            except:
+                os.remove(sqfpath)
+                raise
 
 
 def open_s3_zip(zip_url: str, s3_credentials_yaml_file: str):
