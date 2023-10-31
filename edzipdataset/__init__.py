@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 import shutil
 import yaml
 import boto3
+import logging
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -208,20 +209,6 @@ class TransformedMapDataset(Dataset[T2_co]):
     def __len__(self):
         return len(self.dataset) # type: ignore
     
-    def __setstate__(self, state):
-        (
-            self.dataset, 
-            self.transform,
-            self.transform_args
-        ) = state
-    
-    def __getstate__(self) -> object:
-        return (
-            self.dataset,
-            self.transform,
-            self.transform_args
-        )
-    
 
 
 class ShuffledMapDataset(Dataset[T_co]):
@@ -279,6 +266,42 @@ class ShuffledMapDataset(Dataset[T_co]):
             self.seed,
         ) = state
         self._shuffle()
+    
+
+def _log_exception(_: int, e: Exception) -> None:
+    logging.exception("ExceptionHandlingMapDataset encountered exception. Returning None.")
+
+class ExceptionHandlingMapDataset(Dataset[T_co]):
+    r"""A dataset wrapper that catches exceptions and instead of bailing out, returns None.
+
+    Args:
+        dataset (Dataset[T_co]): The underlying map dataset
+        on_exception (Callable[[int, Exception],Any]): The function to be called when an exception is raised.
+    """
+
+    def __init__(self, dataset: Dataset[T_co], on_exception: Callable[[int, Exception],T_co] = _log_exception) -> None:
+        self.dataset = dataset
+        self.on_exception = on_exception
+
+    def __getitem__(self, idx):
+        try:
+            return self.dataset[idx]
+        except Exception as e:
+            return self.on_exception(idx, e)
+        
+    def __getitems__(self, indices: list[int]) -> list[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            try:
+                return self.dataset.__getitems__(indices)  # type: ignore[attr-defined]
+            except Exception:
+                return [self.__getitem__(idx) for idx in indices]
+        else:
+            return [self.__getitem__(idx) for idx in indices]
+
+    def __len__(self):
+        return len(self.dataset) # type: ignore
     
 
 __all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client","ensure_sqlite_database_exists"]
