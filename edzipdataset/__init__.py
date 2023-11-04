@@ -102,15 +102,20 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
     s3_client = session.client(service_name='s3', **credentials)
     return s3_client
 
-def _derive_sqlite_file_path(zip_url: str, sqlite_dir: str) -> str:
-    return f"{sqlite_dir}/{os.path.basename(zip_url)}.offsets.sqlite3"
+def _derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
+    return zipfile_url + ".offsets.sqlite3"
 
-def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None):
-    sqfpath = _derive_sqlite_file_path(zip_url, sqlite_dir)
+def _derive_sqlite_file_path(sqlite_url: str, sqlite_dir: str) -> str:
+    return f"{sqlite_dir}/{os.path.basename(sqlite_url)}"
+
+def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None):
+    if sqlite_url is None:
+        sqlite_url = _derive_sqlite_url_from_zip_url(zip_url)
+    sqfpath = _derive_sqlite_file_path(sqlite_url, sqlite_dir)
     if not os.path.exists(sqfpath):
         if s3_credentials_yaml_file is None:
             raise ValueError("s3_credentials_yaml_file must be provided if the sqlite3 file does not already exist")
-        with smart_open.open(f"{zip_url}.offsets.sqlite3", "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file))) as sf:
+        with smart_open.open(sqlite_url, "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file))) as sf:
             os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
             try:
                 with open(sqfpath, "wb") as df:
@@ -120,32 +125,35 @@ def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, s3_credentials_
                 raise
 
 
-def open_s3_zip(zip_url: str, s3_credentials_yaml_file: str):
+def _open_s3_zip(zip_url: str, s3_credentials_yaml_file: str):
     return smart_open.open(zip_url, "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file)))
 
-def open_sqlite(sqlite_file: str):
+def _open_sqlite(sqlite_file: str):
     return sqlite3.connect(sqlite_file)
 
 class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
 
-    def __init__(self, zip_url:str, sqlite_dir: str, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
+    def __init__(self, zip_url:str, sqlite_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
                 zip_url (str): The URL of the zip file on S3.
-                sqlite_dir (str): The directory containing the sqlite3 database file ().
+                sqlite_url (str, optional): The URL of the sqlite3 database file. If not provided, it is derived from the zip_url.
+                sqlite_dir (str): The directory containing the sqlite3 database file.
                 s3_client (boto3.client): The S3 client object to use.
         """
         self._zip_url = zip_url
+        if sqlite_url is None:
+            sqlite_url = _derive_sqlite_url_from_zip_url(zip_url)
         self._s3_credentials_yaml_file = s3_credentials_yaml_file
-        ensure_sqlite_database_exists(zip_url, sqlite_dir, s3_credentials_yaml_file)
+        ensure_sqlite_database_exists(zip_url, sqlite_dir, sqlite_url, s3_credentials_yaml_file)
         super().__init__(
-            zip=open_s3_zip,  # type: ignore
-            zip_args=[zip_url,s3_credentials_yaml_file], 
-            con=open_sqlite,
-            con_args=[_derive_sqlite_file_path(zip_url, sqlite_dir)], 
+            zip=_open_s3_zip,  # type: ignore
+            zip_args=[zip_url,s3_credentials_yaml_file],
+            con=_open_sqlite,
+            con_args=[_derive_sqlite_file_path(sqlite_url, sqlite_dir)],
             *args, **kwargs)
 
 
@@ -272,7 +280,7 @@ class ShuffledMapDataset(Dataset[T_co]):
         self._shuffle()
     
 
-def _log_exception(_: int, e: Exception) -> None:
+def _log_exception(idx: int, e: Exception) -> None:
     logging.exception("ExceptionHandlingMapDataset encountered exception. Returning None.")
 
 class ExceptionHandlingMapDataset(Dataset[T_co]):
