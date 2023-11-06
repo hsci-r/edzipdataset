@@ -60,10 +60,10 @@ class EDZipMapDataset(Dataset[T_co]):
         return len(self.infolist)
     
     def __getitem__(self, idx: int) -> T_co:
-        return self.transform(self.edzip, idx, self.infolist[idx])
+        return self.transform(self.edzip, idx, self.infolist[idx]) # type: ignore
 
     def __getitems__(self, idxs: list[int]) -> list[T_co]:
-        return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))]
+        return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))] # type: ignore
     
     def __setstate__(self, state):
         (
@@ -102,15 +102,13 @@ def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
     s3_client = session.client(service_name='s3', **credentials)
     return s3_client
 
-def _derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
+def derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
     return zipfile_url + ".offsets.sqlite3"
 
 def _derive_sqlite_file_path(sqlite_url: str, sqlite_dir: str) -> str:
     return f"{sqlite_dir}/{os.path.basename(sqlite_url)}"
 
-def ensure_sqlite_database_exists(zip_url: str, sqlite_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None):
-    if sqlite_url is None:
-        sqlite_url = _derive_sqlite_url_from_zip_url(zip_url)
+def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None):
     sqfpath = _derive_sqlite_file_path(sqlite_url, sqlite_dir)
     if not os.path.exists(sqfpath):
         if s3_credentials_yaml_file is None:
@@ -146,9 +144,9 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         """
         self._zip_url = zip_url
         if sqlite_url is None:
-            sqlite_url = _derive_sqlite_url_from_zip_url(zip_url)
+            sqlite_url = derive_sqlite_url_from_zip_url(zip_url)
         self._s3_credentials_yaml_file = s3_credentials_yaml_file
-        ensure_sqlite_database_exists(zip_url, sqlite_dir, sqlite_url, s3_credentials_yaml_file)
+        ensure_sqlite_database_exists(sqlite_url, sqlite_dir, s3_credentials_yaml_file)
         super().__init__(
             zip=_open_s3_zip,  # type: ignore
             zip_args=[zip_url,s3_credentials_yaml_file],
@@ -216,7 +214,7 @@ class TransformedMapDataset(Dataset[T2_co]):
         if callable(getattr(self.dataset, "__getitems__", None)):
             return [self.transform(item, *self.transform_args) for item in self.dataset.__getitems__(indices)]  # type: ignore[attr-defined]
         else:
-            return [self.transform(self.dataset[idx], *self.transform_args) for idx in indices]
+            return [self.transform(self.dataset[idx], *self.transform_args) for idx in indices] # type: ignore
 
     def __len__(self):
         return len(self.dataset) # type: ignore
@@ -308,12 +306,12 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
             try:
                 return self.dataset.__getitems__(indices)  # type: ignore[attr-defined]
             except Exception:
-                return [self.__getitem__(idx) for idx in indices]
+                return [self.__getitem__(idx) for idx in indices] # type: ignore
         else:
-            return [self.__getitem__(idx) for idx in indices]
+            return [self.__getitem__(idx) for idx in indices] # type: ignore
 
     def __len__(self):
         return len(self.dataset) # type: ignore
     
 
-__all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client","ensure_sqlite_database_exists"]
+__all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client", "derive_sqlite_url_from_zip_url", "ensure_sqlite_database_exists"]
