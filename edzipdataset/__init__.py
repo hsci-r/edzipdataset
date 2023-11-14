@@ -1,35 +1,42 @@
-from io import IOBase
+from asyncio import AbstractEventLoop
+import asyncio
+from io import BytesIO, IOBase
 import os
 import random
-from typing import Any, Callable, Generic, Optional, Sequence, TypeVar, Union
-from zipfile import ZipInfo
+from typing import Any, Callable, Iterator, Optional, Sequence, Tuple, TypeVar, Union
+from zipfile import ZipInfo, sizeFileHeader # type: ignore
 import edzip
-import smart_open
 import torch
 import yaml
-import boto3
 import sqlite3
 from torch.utils.data import Dataset
 import shutil
 import yaml
-import boto3
 import logging
+import s3fs
+from fsspec.callbacks import TqdmCallback
+import aiobotocore.session
+from stream_unzip import stream_unzip
+import re
 
 
 T_co = TypeVar('T_co', covariant=True)
 
-def open_transform(edzip: edzip.EDZipFile, idx: int, zinfo: ZipInfo) -> IOBase:
-    return edzip.open(zinfo)
+def extract_transform(ezmd: 'EDZipMapDataset', infos: list[Tuple[int,ZipInfo]]) -> list[BytesIO]:
+    return ezmd.extract_in_parallel([info for _,info in infos])
 
 class EDZipMapDataset(Dataset[T_co]):
     """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: Callable[...,IOBase], zip_args: list[Any], con: Callable[...,sqlite3.Connection], con_args: list[Any], transform: Callable[[edzip.EDZipFile,int,ZipInfo], T_co] = open_transform, limit: Optional[Sequence[str]] = None):
+    def __init__(self, zip: Callable[...,IOBase], zip_args: list[Any], con: Callable[...,sqlite3.Connection], con_args: list[Any], transform: Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co] = extract_transform, limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
-                zip (IOBase): A file-like object representing the zip file.
-                con (sqlite3.Connection): A connection to the SQLite database containing the external directory.
+                zip (Callable[...,IOBase]): A function returning a file-like object representing the zip file.
+                zip_args (list[Any]): A list of arguments to pass to the zip function.
+                con (Callable[...,sqlite3.Connection]): A function returning a connection to the SQLite database containing the external directory.
+                con_args (list[Any]): A list of arguments to pass to the con function.
+                transform (Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co], optional): A function to transform the zip file entries to the desired output. Defaults to returning a file-like object for the contents.
                 limit (Sequence[str]): An optional list of filenames to limit the dataset to.
         """
         self.zip = zip
@@ -60,10 +67,10 @@ class EDZipMapDataset(Dataset[T_co]):
         return len(self.infolist)
     
     def __getitem__(self, idx: int) -> T_co:
-        return self.transform(self.edzip, idx, self.infolist[idx]) # type: ignore
+        return self.transform(self, [(idx, self.infolist[idx])])[0] # type: ignore
 
     def __getitems__(self, idxs: list[int]) -> list[T_co]:
-        return [self.transform(self.edzip,idx,info) for idx,info in zip(idxs,self.edzip.getinfos(idxs))] # type: ignore
+        return self.transform(self,zip(idxs,self.edzip.getinfos(idxs))) # type: ignore
     
     def __setstate__(self, state):
         (
@@ -85,22 +92,30 @@ class EDZipMapDataset(Dataset[T_co]):
             self.transform, 
             self.limit
         )
+
+def get_s3_credentials(credentials_yaml_file: Union[str,os.PathLike]) -> dict[str,str]:
+    with open(credentials_yaml_file, 'r') as f:
+        return yaml.safe_load(f)
     
 
-def get_s3_client(credentials_yaml_file: Union[str,os.PathLike]):
-    """Returns an S3 client configured to use the credentials in the provided YAML file.
+def get_s3fs(s3_credentials: dict[str,str]) -> s3fs.S3FileSystem:
+    """Returns an S3 filesystem configured to use the credentials in the provided YAML file.
 
     Args:
         credentials_yaml_file (str): The path to the YAML file containing the AWS credentials.
 
     Returns:
-        s3_client (boto3.client): The S3 client object.
+        s3 (s3fs.S3FileSystem): The S3 client object.
     """
-    with open(credentials_yaml_file, 'r') as f:
-        credentials = yaml.safe_load(f)
-    session = boto3.Session()
-    s3_client = session.client(service_name='s3', **credentials)
-    return s3_client
+    
+    s3 = s3fs.S3FileSystem(
+        key=s3_credentials['aws_access_key_id'], 
+        secret=s3_credentials['aws_secret_access_key'], 
+        endpoint_url=s3_credentials['endpoint_url'])
+    return s3
+
+def get_aio_s3_client(s3_credentials: dict[str,Any]) -> aiobotocore.session.ClientCreatorContext:
+    return aiobotocore.session.get_session().create_client('s3', **s3_credentials)
 
 def derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
     return zipfile_url + ".offsets.sqlite3"
@@ -108,23 +123,15 @@ def derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
 def _derive_sqlite_file_path(sqlite_url: str, sqlite_dir: str) -> str:
     return f"{sqlite_dir}/{os.path.basename(sqlite_url)}"
 
-def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None):
+def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentials: dict[str,Any] = {}):
     sqfpath = _derive_sqlite_file_path(sqlite_url, sqlite_dir)
     if not os.path.exists(sqfpath):
-        if s3_credentials_yaml_file is None:
-            raise ValueError("s3_credentials_yaml_file must be provided if the sqlite3 file does not already exist")
-        with smart_open.open(sqlite_url, "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file))) as sf:
-            os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
-            try:
-                with open(sqfpath, "wb") as df:
-                    shutil.copyfileobj(sf, df) # type: ignore
-            except:
-                os.remove(sqfpath)
-                raise
+        os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
+        get_s3fs(s3_credentials).get_file(sqlite_url, sqfpath, callback=TqdmCallback(tqdm_kwargs=dict(unit='b', unit_scale=True, dynamic_ncols=True))) # type: ignore
 
 
-def _open_s3_zip(zip_url: str, s3_credentials_yaml_file: str):
-    return smart_open.open(zip_url, "rb", transport_params=dict(client=get_s3_client(s3_credentials_yaml_file)))
+def _open_s3_zip(zip_url: str, s3_credentials: dict[str,Any]):
+    return get_s3fs(s3_credentials).open(zip_url, fill_cache=False)
 
 def _open_sqlite(sqlite_file: str):
     return sqlite3.connect(sqlite_file)
@@ -142,17 +149,53 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
                 sqlite_dir (str): The directory containing the sqlite3 database file.
                 s3_client (boto3.client): The S3 client object to use.
         """
-        self._zip_url = zip_url
         if sqlite_url is None:
             sqlite_url = derive_sqlite_url_from_zip_url(zip_url)
-        self._s3_credentials_yaml_file = s3_credentials_yaml_file
-        ensure_sqlite_database_exists(sqlite_url, sqlite_dir, s3_credentials_yaml_file)
+        if s3_credentials_yaml_file is not None:
+            self.s3_credentials = get_s3_credentials(s3_credentials_yaml_file)
+        else:
+            self.s3_credentials = {}
+        (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
+        ensure_sqlite_database_exists(sqlite_url, sqlite_dir, self.s3_credentials)
         super().__init__(
             zip=_open_s3_zip,  # type: ignore
-            zip_args=[zip_url,s3_credentials_yaml_file],
+            zip_args=[zip_url, self.s3_credentials],
             con=_open_sqlite,
             con_args=[_derive_sqlite_file_path(sqlite_url, sqlite_dir)],
             *args, **kwargs)
+
+    def aio_get_s3_client(self):
+        return get_aio_s3_client(s3_credentials=self.s3_credentials)
+    
+    async def _aio_get_range(self, client, start: int, end: int) -> bytes:
+        response = await client.get_object(Bucket=self.bucket, Key=self.path, Range=f"bytes={start}-{end}")
+        async with response['Body'] as stream:
+            return await stream.read()
+        
+    async def aio_extract_file(self, client, offset, size) -> BytesIO:
+        compressed_bytes = await self._aio_get_range(client, offset, offset+size-1)
+        _,_, uncompressed_chunks = next(stream_unzip([compressed_bytes]))
+        uncompressed_bytes = BytesIO()
+        for uncompressed_chunk in uncompressed_chunks:
+            uncompressed_bytes.write(uncompressed_chunk)
+        uncompressed_bytes.seek(0)
+        return uncompressed_bytes
+    
+    async def _extract_in_parallel(self, infos: Iterator[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
+        async with self.aio_get_s3_client() as client:
+            return await asyncio.gather(*[self.aio_extract_file(client, zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
+        
+    def extract_in_parallel(self, infos: Iterator[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
+        if loop is None and asyncio._get_running_loop() is not None:
+            loop = asyncio.get_running_loop()
+        if loop is not None:
+            return asyncio.run_coroutine_threadsafe(self._extract_in_parallel(infos, max_extra), loop).result()
+        return asyncio.run(self._extract_in_parallel(infos))
+        
+
+        
+
+        
 
 
 class LinearMapSubset(Dataset[T_co]):
@@ -314,4 +357,4 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
         return len(self.dataset) # type: ignore
     
 
-__all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3_client", "derive_sqlite_url_from_zip_url", "ensure_sqlite_database_exists"]
+__all__ = ["EDZipMapDataset","S3HostedEDZipMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","get_s3fs", "derive_sqlite_url_from_zip_url", "ensure_sqlite_database_exists","get_s3_credentials","get_aio_s3_client","ExceptionHandlingMapDataset"]
