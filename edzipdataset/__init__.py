@@ -2,7 +2,7 @@ from asyncio import AbstractEventLoop
 import asyncio
 from io import BytesIO, IOBase
 import os
-from typing import Any, Callable, Iterator, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence, Tuple, TypeVar, Union
 from zipfile import ZipInfo, sizeFileHeader # type: ignore
 import edzip
 import yaml
@@ -180,11 +180,11 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         uncompressed_bytes.seek(0)
         return uncompressed_bytes
     
-    async def _extract_in_parallel(self, infos: Iterator[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
+    async def _extract_in_parallel(self, infos: Iterable[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
         async with self.aio_get_s3_client() as client:
             return await asyncio.gather(*[self.aio_extract_file(client, zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
         
-    def extract_in_parallel(self, infos: Iterator[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
+    def extract_in_parallel(self, infos: Iterable[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
         if loop is None and asyncio._get_running_loop() is not None:
             loop = asyncio.get_running_loop()
         if loop is not None:
