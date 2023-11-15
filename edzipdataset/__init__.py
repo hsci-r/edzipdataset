@@ -160,7 +160,7 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             zip=_open_s3_zip,  # type: ignore
             zip_args=[zip_url, self.s3_credentials],
             con=_open_sqlite,
-            con_args=[_derive_sqlite_file_path(sqlite_url, sqlite_dir)],
+            con_args=[derive_sqlite_file_path(sqlite_url, sqlite_dir)],
             *args, **kwargs)
 
     def aio_get_s3_client(self):
