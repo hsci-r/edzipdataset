@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset import ExceptionHandlingMapDataset, TransformedMapDataset
+from edzipdataset.dsutil import ExceptionHandlingMapDataset, TransformedMapDataset
 import pickle
 
 def _except_on_two(tensor: torch.Tensor) -> torch.Tensor:

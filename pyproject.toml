@@ -14,12 +14,12 @@ keywords = [
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"
-edzip = "^0.1.9"
-torch = "^2.0.0"
-numpy = "^1.26.0"
-pyyaml = "^6.0.1"
-s3fs = "^2023.10.0"
-tqdm = "^4.66.1"
+edzip = ">=0.1.12"
+torch = ">=2.0.0"
+numpy = ">=1.26.0"
+pyyaml = ">=6.0.1"
+s3fs = ">=2023.10.0"
+tqdm = ">=4.66.1"
 
 
 [tool.poetry.group.dev.dependencies]

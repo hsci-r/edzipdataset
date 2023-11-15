@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import shutil
 from zipfile import ZipFile, ZipInfo
-from edzip import EDZipFile, create_sqlite_directory_from_zip
+from edzip.sqlite import create_sqlite_directory_from_zip
 import pickle
 from s3fs import S3FileSystem
 

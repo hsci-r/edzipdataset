@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset import LinearMapSubset
+from edzipdataset.dsutil import LinearMapSubset
 
 class TestLinearMapSubset(unittest.TestCase):
     def setUp(self):
