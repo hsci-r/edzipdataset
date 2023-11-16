@@ -194,10 +194,15 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     def __getstate__(self):
         return (
             super().__getstate__(), 
-            self.s3_credentials
+            self.s3_credentials,
+            self.bucket,
+            self.path
         )
 
     def __setstate__(self, state):
-        (super_state, self.s3_credentials) = state
+        (super_state, 
+         self.s3_credentials, 
+         self.bucket, 
+         self.path) = state
         super().__setstate__(super_state)
 
