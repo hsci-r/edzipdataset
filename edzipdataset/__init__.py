@@ -190,3 +190,14 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         if loop is not None:
             return asyncio.run_coroutine_threadsafe(self._extract_in_parallel(infos, max_extra), loop).result()
         return asyncio.run(self._extract_in_parallel(infos))
+    
+    def __getstate__(self):
+        return (
+            super().__getstate__(), 
+            self.s3_credentials
+        )
+
+    def __setstate__(self, state):
+        (super_state, self.s3_credentials) = state
+        super().__setstate__(super_state)
+
