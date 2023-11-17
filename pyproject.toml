@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "edzipdataset"
-version = "0.1.30"
+version = "0.1.31"
 description = "EDZip-based, S3-hosted pytorch dataset"
 authors = ["Eetu Mäkelä <eetu.makela@iki.fi>"]
 readme = "README.md"

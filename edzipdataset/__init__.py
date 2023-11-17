@@ -2,7 +2,7 @@ from asyncio import AbstractEventLoop
 import asyncio
 from io import BytesIO, IOBase
 import os
-from typing import Any, Callable, Iterable, Iterator, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union
 from zipfile import ZipInfo, sizeFileHeader # type: ignore
 import edzip
 import fsspec
@@ -10,7 +10,6 @@ import yaml
 import sqlite3
 from torch.utils.data import Dataset
 import yaml
-import s3fs
 from fsspec.callbacks import TqdmCallback
 import aiobotocore.session
 from stream_unzip import stream_unzip
@@ -170,6 +169,8 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             zip = _open_s3_zip
             zip_args = [zip_url, self.s3_credentials]
         else:
+            self.bucket = None
+            self.path = None
             zip = _open_file_zip
             zip_args = [zip_url]
         ensure_sqlite_database_exists(sqlite_url, sqlite_dir, self.s3_credentials)
