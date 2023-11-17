@@ -162,4 +162,14 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
     def __len__(self):
         return len(self.dataset) # type: ignore
     
-__all__ = ["ExceptionHandlingMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset"]
+class DatasetToIterableDataset(torch.utils.data.IterableDataset):
+    def __init__(self, dataset: torch.utils.data.Dataset):
+        self.dataset = dataset
+
+    def __iter__(self):
+        if hasattr(self.dataset, "__iter__"):
+            return self.dataset.__iter__()
+        for i in range(len(self.dataset)):
+            yield self.dataset[i]
+    
+__all__ = ["ExceptionHandlingMapDataset","LinearMapSubset","TransformedMapDataset","ShuffledMapDataset","DatasetToIterableDataset"]

@@ -71,6 +71,9 @@ class EDZipMapDataset(Dataset[T_co]):
     def __getitems__(self, idxs: list[int]) -> list[T_co]:
         return self.transform(self,zip(idxs,self.edzip.getinfos(idxs))) # type: ignore
     
+    def __iter__(self):
+        return map(lambda t: self.transform(self, [t])[0], enumerate(self.infolist.__iter__())) # type: ignore
+    
     def __setstate__(self, state):
         (
             self.zip,
@@ -202,8 +205,8 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         async with self.aio_get_s3_client() as client:
             return await asyncio.gather(*[self.aio_extract_file(client, zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
         
-    def extract_possibly_in_parallel(self, infos: Iterable[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
-        if self.bucket is None:
+    def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
+        if len(infos)==1 or self.bucket is None:
             return [BytesIO(self.edzip.read(zinfo)) for zinfo in infos]
         if loop is None and asyncio._get_running_loop() is not None:
             loop = asyncio.get_running_loop()

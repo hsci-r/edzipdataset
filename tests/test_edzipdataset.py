@@ -11,6 +11,7 @@ import pickle
 from fsspec import AbstractFileSystem
 
 from edzipdataset import S3HostedEDZipMapDataset
+from edzipdataset.dsutil import DatasetToIterableDataset
 
 def _transform(edmd: S3HostedEDZipMapDataset, infos:list[Tuple[int,ZipInfo]]): 
     return [edmd.edzip.open(zinfo).read()+str(idx).encode() for idx,zinfo in infos]
@@ -62,4 +63,11 @@ class TestS3HostedEDZipMapDataset(unittest.TestCase):
         self.assertEqual(len(ds2), 2)
         self.assertEqual(ds2[0], b"Hello, world!0")
         self.assertEqual(ds2[1], b"Goodbye!1")
+
+    def test_s3hostededzipdataset_as_iterabledataset(self):
+        ds = DatasetToIterableDataset(S3HostedEDZipMapDataset[IOBase]("s3://foo/test.zip", self.tmpdir, transform=_transform, limit=["test.txt", "test3.txt"]))
+        expected = [b"Hello, world!0",b"Goodbye!1" ]
+        for act, exp in zip(ds,expected):
+            self.assertEqual(act, exp)
+
 
