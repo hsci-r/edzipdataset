@@ -8,7 +8,7 @@ import shutil
 from zipfile import ZipFile, ZipInfo
 from edzip.sqlite import create_sqlite_directory_from_zip
 import pickle
-from s3fs import S3FileSystem
+from fsspec import AbstractFileSystem
 
 from edzipdataset import S3HostedEDZipMapDataset
 
@@ -25,10 +25,10 @@ class TestS3HostedEDZipMapDataset(unittest.TestCase):
             zf.writestr("test2.txt", "Hello again!")
             zf.writestr("test3.txt", "Goodbye!")
             create_sqlite_directory_from_zip(zf, self.tmpdir+"/test.zip.offsets.sqlite3").close()
-        s3 = Mock(spec=S3FileSystem)
-        s3.open.return_value = zfbuffer
+        fs = Mock(spec=AbstractFileSystem)
+        fs.open.return_value = zfbuffer
         self.patchers = [
-            patch("edzipdataset.get_s3fs", return_value=s3),
+            patch("edzipdataset.get_fs", return_value=fs),
         ]
         for patcher in self.patchers:
             patcher.start()
