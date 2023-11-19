@@ -1,3 +1,4 @@
+import functools
 import unittest
 
 import torch
@@ -38,7 +39,7 @@ class TestTransformedMapDataset(unittest.TestCase):
         self.assertEqual(ds2.__getitems__([0,2]), [2,4])
 
     def test_transformeddataset_with_args_pickling(self):
-        ds = TransformedMapDataset(self.dataset, _transform_with_args, [2])
+        ds = TransformedMapDataset(self.dataset, functools.partial(_transform_with_args, y=2))
         self.assertEqual(len(ds), 3)
         self.assertEqual(ds[0], 2)
         self.assertEqual(ds[1], 3)

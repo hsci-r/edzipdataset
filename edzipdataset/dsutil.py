@@ -51,21 +51,20 @@ class TransformedMapDataset(Dataset[T2_co]):
         transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
     """
 
-    def __init__(self, dataset: Dataset[T_co], transform: Callable[...,T2_co], transform_args: list[Any] = []) -> None:
+    def __init__(self, dataset: Dataset[T_co], transform: Callable[...,T2_co]) -> None:
         self.dataset = dataset
         self.transform = transform
-        self.transform_args = transform_args
 
     def __getitem__(self, idx):
-        return self.transform(self.dataset[idx], *self.transform_args)
+        return self.transform(self.dataset[idx])
 
     def __getitems__(self, indices: list[int]) -> list[T2_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
-            return [self.transform(item, *self.transform_args) for item in self.dataset.__getitems__(indices)]  # type: ignore[attr-defined]
+            return [self.transform(item) for item in self.dataset.__getitems__(indices)]  # type: ignore[attr-defined]
         else:
-            return [self.transform(self.dataset[idx], *self.transform_args) for idx in indices] # type: ignore
+            return [self.transform(self.dataset[idx]) for idx in indices] # type: ignore
 
     def __len__(self):
         return len(self.dataset) # type: ignore
