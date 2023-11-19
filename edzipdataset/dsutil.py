@@ -127,8 +127,8 @@ class ShuffledMapDataset(Dataset[T_co]):
         self._shuffle()
     
 
-def _log_exception(idx: int, e: Exception) -> None:
-    logging.exception("ExceptionHandlingMapDataset encountered exception. Returning None.")
+def _log_exception(ds: 'ExceptionHandlingMapDataset', idx: int, e: Exception) -> None:
+    logging.exception(f"ExceptionHandlingMapDataset encountered exception at index {idx}. Returning None.")
 
 class ExceptionHandlingMapDataset(Dataset[T_co]):
     r"""A dataset wrapper that catches exceptions and instead of bailing out, returns None.
@@ -138,7 +138,7 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
         on_exception (Callable[[int, Exception],Any]): The function to be called when an exception is raised.
     """
 
-    def __init__(self, dataset: Dataset[T_co], on_exception: Callable[[int, Exception],T_co] = _log_exception) -> None:
+    def __init__(self, dataset: Dataset[T_co], on_exception: Callable[['ExceptionHandlingMapDataset', int, Exception],T_co] = _log_exception) -> None:
         self.dataset = dataset
         self.on_exception = on_exception
 
@@ -146,7 +146,7 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
         try:
             return self.dataset[idx]
         except Exception as e:
-            return self.on_exception(idx, e)
+            return self.on_exception(self, idx, e)
         
     def __getitems__(self, indices: list[int]) -> list[T_co]:
         # add batched sampling support when parent dataset supports it.
