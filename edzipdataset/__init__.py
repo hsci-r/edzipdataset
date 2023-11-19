@@ -14,6 +14,7 @@ from fsspec.callbacks import TqdmCallback
 import aiobotocore.session
 from stream_unzip import stream_unzip
 import re
+import multiprocessing_utils
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -44,23 +45,23 @@ class EDZipMapDataset(Dataset[T_co]):
         self.con_args = con_args
         self.transform = transform
         self.limit = limit
-        self._edzip = None
-        self._infolist = None
+        self._local = multiprocessing_utils.local()
+        
 
     @property
     def edzip(self) -> edzip.EDZipFile:
-        if self._edzip is None:
-            self._edzip = edzip.EDZipFile(self.zip(*self.zip_args), self.con(*self.con_args))
-        return self._edzip
+        if not hasattr(self._local, 'edzip'):
+            self._local.edzip = edzip.EDZipFile(self.zip(*self.zip_args), self.con(*self.con_args))
+        return self._local.edzip
     
     @property
     def infolist(self) -> Sequence[ZipInfo]:
-        if self._infolist is None:
+        if not hasattr(self._local, 'infolist'):
             if self.limit is not None:
-                self._infolist = list(self.edzip.getinfos(self.limit))
+                self._local.infolist = list(self.edzip.getinfos(self.limit))
             else:
-                self._infolist = self.edzip.infolist()
-        return self._infolist
+                self._local.infolist = self.edzip.infolist()
+        return self._local.infolist
         
     def __len__(self):
         return len(self.infolist)
@@ -82,8 +83,7 @@ class EDZipMapDataset(Dataset[T_co]):
             self.con_args,
             self.transform, 
             self.limit) = state
-        self._edzip = None
-        self._infolist = None
+        self._local = multiprocessing_utils.local()
     
     def __getstate__(self) -> object:
         return (
