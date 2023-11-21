@@ -15,7 +15,9 @@ import aiobotocore.session
 from stream_unzip import stream_unzip
 import re
 import multiprocessing_utils
+from edzipdataset.fsspecutil import SharedMMapCache
 
+SharedMMapCache.register_cache()
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -139,8 +141,9 @@ def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentia
         os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
         get_fs(sqlite_url, s3_credentials).get_file(sqlite_url, sqfpath, callback=TqdmCallback(tqdm_kwargs=dict(unit='b', unit_scale=True, dynamic_ncols=True))) # type: ignore
 
-def _open_s3_zip(zip_url: str, s3_credentials: dict[str,Any]):
-    return get_fs(zip_url, s3_credentials).open(zip_url, fill_cache=False)
+def _open_s3_zip(zip_url: str, cache_dir: str, s3_credentials: dict[str,Any]):
+    cache_loc = cache_dir+"/"+os.path.basename(zip_url)
+    return get_fs(zip_url, s3_credentials).open(zip_url, cache_type="smmap", cache_options=dict(location=cache_loc+".cache", index_location=cache_loc+".cache-index"), fill_cache=False)
 
 def _open_file_zip(zip_url: str):
     return open(zip_url, 'rb')
@@ -152,13 +155,13 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
 
-    def __init__(self, zip_url:str, sqlite_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
+    def __init__(self, zip_url:str, cache_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
                 zip_url (str): The URL of the zip file on S3.
                 sqlite_url (str, optional): The URL of the sqlite3 database file. If not provided, it is derived from the zip_url.
-                sqlite_dir (str): The directory containing the sqlite3 database file.
+                cache_dir (str): The directory containing the sqlite3 database file and other cached files.
                 s3_client (boto3.client): The S3 client object to use.
         """
         if sqlite_url is None:
@@ -170,18 +173,18 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         if zip_url.startswith('s3:'):
             (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
             zip = _open_s3_zip
-            zip_args = [zip_url, self.s3_credentials]
+            zip_args = [zip_url, cache_dir, self.s3_credentials]
         else:
             self.bucket = None
             self.path = None
             zip = _open_file_zip
             zip_args = [zip_url]
-        ensure_sqlite_database_exists(sqlite_url, sqlite_dir, self.s3_credentials)
+        ensure_sqlite_database_exists(sqlite_url, cache_dir, self.s3_credentials)
         super().__init__(
             zip=zip,  # type: ignore
             zip_args=zip_args,
             con=_open_sqlite,
-            con_args=[derive_sqlite_file_path(sqlite_url, sqlite_dir)],
+            con_args=[derive_sqlite_file_path(sqlite_url, cache_dir)],
             *args, **kwargs)
 
     def aio_get_s3_client(self):
