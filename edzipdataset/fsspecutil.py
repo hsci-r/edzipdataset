@@ -11,9 +11,10 @@ class SharedMMapCache(MMapCache):
 
     name="smmap"
 
-    def __init__(self, blocksize: int, fetcher: Fetcher, size: int, location: str, index_location: str) -> None:
+    def __init__(self, blocksize: int, fetcher: Fetcher, size: int, location: str, index_location: str, parallel_timeout = 30) -> None:
         super().__init__(blocksize, fetcher, size, location, None)
         self.index_location = index_location
+        self.parallel_timeout = parallel_timeout
         self._index = self._makeindex()
 
     def _makeindex(self) -> mmap.mmap | bytearray:
@@ -65,7 +66,7 @@ class SharedMMapCache(MMapCache):
                         if self._index[block] != 2:
                             done = False
                             time.sleep(0.1)
-                if not done:
+                if not done: # Waited for 30 seconds for other processes to finish fetching the needed blocks. Give up and do it ourselves.
                     for i in waiting:
                         if self._index[i] != 2:
                             self._index[i] = 0
@@ -75,8 +76,10 @@ class SharedMMapCache(MMapCache):
     def __getstate__(self):
         state = super().__getstate__()
         del state['_index']
+        return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]):
+        print(state)
         super().__setstate__(state)
         self._index = self._makeindex()
 

@@ -8,6 +8,7 @@ from unittest.mock import Mock, call
 import fsspec
 from fsspec.implementations.http import HTTPFileSystem
 from edzipdataset.fsspecutil import SharedMMapCache
+import pickle
 
 
 def paral_fetch(fetcher, cache_dir):
@@ -70,3 +71,16 @@ class TestSharedMMapCache(unittest.TestCase):
         with fsspec.open("https://www.google.com/robots.txt", "rb", cache_type="smmap", cache_options=dict(location=self.dir+"/cache-2", index_location=self.dir+"/cache-index-2")) as f:
             self.assertIsInstance(f.cache, SharedMMapCache) # type: ignore
 
+    def test_sharedmmapcache_pickling(self):
+        paral_fetcher.reset_mock()
+        c = SharedMMapCache(blocksize=1024, fetcher=_paral_fetcher, size=65536, location=self.dir+"/cache3", index_location=self.dir+"/cache-index3")
+        self.assertEqual(c._fetch(0,256), bytes([n % 256 for n in range(0,256)]))
+        self.assertEqual(c._fetch(45,600), bytes([n % 256 for n in range(45,600)]))
+        self.assertEqual(c._fetch(2100,4100), bytes([n % 256 for n in range(2100,4100)]))
+        self.assertEqual(c._fetch(2200,4200), bytes([n % 256 for n in range(2200,4200)]))
+        c2 = pickle.loads(pickle.dumps(c))
+        self.assertEqual(c2._fetch(0,256), bytes([n % 256 for n in range(0,256)]))
+        self.assertEqual(c2._fetch(45,600), bytes([n % 256 for n in range(45,600)]))
+        self.assertEqual(c2._fetch(2100,4100), bytes([n % 256 for n in range(2100,4100)]))
+        self.assertEqual(c2._fetch(2200,4200), bytes([n % 256 for n in range(2200,4200)]))
+        
