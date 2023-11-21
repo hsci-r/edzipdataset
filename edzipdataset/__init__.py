@@ -1,5 +1,6 @@
 from asyncio import AbstractEventLoop
 import asyncio
+import functools
 from io import BytesIO, IOBase
 import os
 from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union
@@ -30,21 +31,17 @@ def possibly_parallel_extract_transform(ezmd: 'S3HostedEDZipMapDataset', infos: 
 class EDZipMapDataset(Dataset[T_co]):
     """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, zip: Callable[...,IOBase], zip_args: list[Any], con: Callable[...,sqlite3.Connection], con_args: list[Any], transform: Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co] = extract_transform, limit: Optional[Sequence[str]] = None):
+    def __init__(self, open_zip: Callable[[],IOBase], open_con: Callable[[],sqlite3.Connection], transform: Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co] = extract_transform, limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
-                zip (Callable[...,IOBase]): A function returning a file-like object representing the zip file.
-                zip_args (list[Any]): A list of arguments to pass to the zip function.
-                con (Callable[...,sqlite3.Connection]): A function returning a connection to the SQLite database containing the external directory.
-                con_args (list[Any]): A list of arguments to pass to the con function.
+                zip (Callable[[],IOBase]): A function returning a file-like object representing the zip file.
+                con (Callable[[],sqlite3.Connection]): A function returning a connection to the SQLite database containing the external directory.
                 transform (Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co], optional): A function to transform the zip file entries to the desired output. Defaults to returning a file-like object for the contents.
                 limit (Sequence[str]): An optional list of filenames to limit the dataset to.
         """
-        self.zip = zip
-        self.zip_args = zip_args
-        self.con = con
-        self.con_args = con_args
+        self.open_zip = open_zip
+        self.open_con = open_con
         self.transform = transform
         self.limit = limit
         self._local = multiprocessing_utils.local()
@@ -53,7 +50,7 @@ class EDZipMapDataset(Dataset[T_co]):
     @property
     def edzip(self) -> edzip.EDZipFile:
         if not hasattr(self._local, 'edzip'):
-            self._local.edzip = edzip.EDZipFile(self.zip(*self.zip_args), self.con(*self.con_args))
+            self._local.edzip = edzip.EDZipFile(self.open_zip(), self.open_con())
         return self._local.edzip
     
     @property
@@ -79,20 +76,16 @@ class EDZipMapDataset(Dataset[T_co]):
     
     def __setstate__(self, state):
         (
-            self.zip,
-            self.zip_args, 
-            self.con, 
-            self.con_args,
+            self.open_zip,
+            self.open_con, 
             self.transform, 
             self.limit) = state
         self._local = multiprocessing_utils.local()
     
     def __getstate__(self) -> object:
         return (
-            self.zip, 
-            self.zip_args,
-            self.con, 
-            self.con_args,
+            self.open_zip, 
+            self.open_con, 
             self.transform, 
             self.limit
         )
@@ -172,19 +165,15 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             self.s3_credentials = {}
         if zip_url.startswith('s3:'):
             (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
-            zip = _open_s3_zip
-            zip_args = [zip_url, cache_dir, self.s3_credentials]
+            open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials)
         else:
             self.bucket = None
             self.path = None
-            zip = _open_file_zip
-            zip_args = [zip_url]
+            open_zip = functools.partial(_open_file_zip, zip_url)
         ensure_sqlite_database_exists(sqlite_url, cache_dir, self.s3_credentials)
         super().__init__(
-            zip=zip,  # type: ignore
-            zip_args=zip_args,
-            con=_open_sqlite,
-            con_args=[derive_sqlite_file_path(sqlite_url, cache_dir)],
+            open_zip=open_zip,
+            open_con=functools.partial(_open_sqlite,derive_sqlite_file_path(sqlite_url, cache_dir)),
             *args, **kwargs)
 
     def aio_get_s3_client(self):
