@@ -12,7 +12,7 @@ import sqlite3
 from torch.utils.data import Dataset
 import yaml
 from fsspec.callbacks import TqdmCallback
-import aiobotocore.session
+from s3fs import S3FileSystem
 from stream_unzip import stream_unzip
 import re
 import multiprocessing_utils
@@ -116,9 +116,10 @@ def _get_fs(url: str, s3_credentials: dict[str,Optional[str]] | None, asynchrono
         protocol = protocol.group(0)
     if protocol == "s3" and s3_credentials is not None:
         kwargs = dict(
-            key=s3_credentials['aws_access_key_id'], 
-            secret=s3_credentials['aws_secret_access_key'], 
-            endpoint_url=s3_credentials['endpoint_url'])
+            key=s3_credentials['aws_access_key_id'] if 'aws_access_key_id' in s3_credentials else None, 
+            secret=s3_credentials['aws_secret_access_key'] if 'aws_secret_access_key' in s3_credentials else None, 
+            endpoint_url=s3_credentials['endpoint_url'] if 'endpoint_url' in s3_credentials else None
+        )
     else:
         kwargs = dict()
     return fsspec.filesystem(protocol, asynchronous=asynchronous, **kwargs)
@@ -165,16 +166,17 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         if sqlite_url is None:
             sqlite_url = derive_sqlite_url_from_zip_url(zip_url)
         if s3_credentials_yaml_file is not None:
-            s3_credentials = get_s3_credentials(s3_credentials_yaml_file)
+            self.s3_credentials = get_s3_credentials(s3_credentials_yaml_file)
         else:
             self.s3_credentials = None
         if zip_url.startswith('s3:'):
             (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
             open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials, block_size)
-            with open_zip() as f:
-                fs = f.fs
-                self.acache: SharedMMapCache = open_zip().cache # type: ignore
-                self.acache.afetcher = functools.partial(fs._cat_file, zip_url, None) # type: ignore
+            with open_zip() as f: # This is very hacky. It relies on us having defined open_zip to be _open_s3_zip, which we know returns an S3File with an smmap cache.
+                fs: S3FileSystem = f.fs
+                acache: SharedMMapCache = open_zip().cache # type: ignore # here we make use of the fact that we know the cache is an smmap cache
+                self.acache = acache
+                self.acache.afetcher = functools.partial(fs._cat_file, zip_url, None) # and here we make use of the fact that we know it is specifically the S3FileSystem _cat_file
         else:
             self.bucket = None
             self.path = None
