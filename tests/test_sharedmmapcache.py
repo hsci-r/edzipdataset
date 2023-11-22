@@ -1,3 +1,4 @@
+import asyncio
 from multiprocessing import Process
 import shutil
 import tempfile
@@ -83,4 +84,19 @@ class TestSharedMMapCache(unittest.TestCase):
         self.assertEqual(c2._fetch(45,600), bytes([n % 256 for n in range(45,600)]))
         self.assertEqual(c2._fetch(2100,4100), bytes([n % 256 for n in range(2100,4100)]))
         self.assertEqual(c2._fetch(2200,4200), bytes([n % 256 for n in range(2200,4200)]))
+
+    def test_sharedmmapcache_async(self):
+        async def _afetcher(start, end) -> bytes:
+            ret = bytearray(end-start)
+            for i in range(start, end):
+                ret[i-start] = i % 256
+            await asyncio.sleep(0.1)
+            return bytes(ret)
+        c = SharedMMapCache(blocksize=1024, fetcher=None, afetcher=_afetcher, size=65536, location=self.dir+"/cache3", index_location=self.dir+"/cache-index3") # type: ignore
+        async def aafetch(start,end):
+            self.assertEqual(await c._afetch(start,end), bytes([n % 256 for n in range(start,end)]))
+        async def atest():
+            await asyncio.gather(aafetch(0,256), aafetch(45,600), aafetch(2100,4100), aafetch(2200,4200))
+    
+        asyncio.run(atest())
         
