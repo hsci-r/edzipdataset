@@ -16,9 +16,16 @@ import aiobotocore.session
 from stream_unzip import stream_unzip
 import re
 import multiprocessing_utils
-from edzipdataset.fsspecutil import SharedMMapCache, get_process_safe_fsspec_loop
+from edzipdataset.fsspecutil import SharedMMapCache
+import fsspec.asyn
 
+# register out smmap cache
 SharedMMapCache.register_cache()
+# without this, fsspec hangs in a multiprocessing fork context when it has been already used in the parent process
+os.register_at_fork(
+    after_in_child=fsspec.asyn.reset_lock,
+)
+
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -117,7 +124,7 @@ def get_fs(url: str, s3_credentials: dict[str,Optional[str]]) -> fsspec.Abstract
             endpoint_url=s3_credentials['endpoint_url'])
     else:
         kwargs = dict()
-    return fsspec.filesystem(protocol, loop=get_process_safe_fsspec_loop(), **kwargs)
+    return fsspec.filesystem(protocol, **kwargs)
 
 def get_aio_s3_client(s3_credentials: dict[str,Any]) -> aiobotocore.session.ClientCreatorContext:
     return aiobotocore.session.get_session().create_client('s3', **s3_credentials)

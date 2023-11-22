@@ -1,33 +1,9 @@
-import asyncio
 import datetime
 import mmap
 import os
-import threading
 import time
 from typing import Any
 from fsspec.caching import Fetcher, MMapCache, register_cache, caches
-import multiprocessing_utils
-from edzipdataset.processlocal import ProcessLocal
-
-loop_holder_lock = multiprocessing_utils.SharedLock()
-loop_holder = ProcessLocal()
-
-from fsspec.asyn import _selector_policy
-
-def get_process_safe_fsspec_loop() -> asyncio.AbstractEventLoop:
-    if not hasattr(loop_holder, 'loop'):
-        with loop_holder_lock:
-            # repeat the check just in case the loop got filled between the
-            # previous two calls from another thread
-            if not hasattr(loop_holder, 'loop'):
-                with _selector_policy():
-                    loop_holder.loop = asyncio.new_event_loop()
-                th = threading.Thread(target=loop_holder.loop.run_forever, name="process-safe-fsspecIO")
-                th.daemon = True
-                th.start()
-                loop_holder.iothread = th
-    return loop_holder.loop
-
 
 class SharedMMapCache(MMapCache):
 
