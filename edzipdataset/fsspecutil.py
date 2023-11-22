@@ -79,7 +79,6 @@ class SharedMMapCache(MMapCache):
         return state
 
     def __setstate__(self, state: dict[str, Any]):
-        print(state)
         super().__setstate__(state)
         self._index = self._makeindex()
 
