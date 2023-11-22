@@ -4,7 +4,7 @@ from zipfile import ZipFile
 import click
 from edzip.sqlite import create_sqlite_directory_from_zip
 
-from edzipdataset import derive_sqlite_file_path, derive_sqlite_url_from_zip_url, get_s3_credentials, get_fs
+from edzipdataset import derive_sqlite_file_path, derive_sqlite_url_from_zip_url, get_s3_credentials, _get_fs
 
 @click.command()
 @click.option("--key", required=False)
@@ -20,7 +20,7 @@ def main(s3_url:str, sqlite_filename:Optional[str] = None, endpoint_url: Optiona
     
     if sqlite_filename is None:
         sqlite_filename = derive_sqlite_file_path(derive_sqlite_url_from_zip_url(s3_url) ,".")
-    with get_fs(s3_url, credentials).open(s3_url) as zf: # type: ignore
+    with _get_fs(s3_url, credentials).open(s3_url) as zf: # type: ignore
         create_sqlite_directory_from_zip(ZipFile(zf), sqlite_filename) # type: ignore
 
 

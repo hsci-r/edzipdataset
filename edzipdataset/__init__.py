@@ -38,7 +38,7 @@ def possibly_parallel_extract_transform(ezmd: 'S3HostedEDZipMapDataset', infos: 
 class EDZipMapDataset(Dataset[T_co]):
     """A map dataset class for reading data from a zip file with an external sqlite3 directory."""
 
-    def __init__(self, open_zip: Callable[[],IOBase], open_con: Callable[[],sqlite3.Connection], transform: Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], T_co] = extract_transform, limit: Optional[Sequence[str]] = None):
+    def __init__(self, open_zip: Callable[[],IOBase], open_con: Callable[[],sqlite3.Connection], transform: Callable[['EDZipMapDataset',list[Tuple[int,ZipInfo]]], list[T_co]] = extract_transform, limit: Optional[Sequence[str]] = None):
         """Creates a new instance of the EDZipDataset class.
 
             Args:
@@ -97,17 +97,14 @@ class EDZipMapDataset(Dataset[T_co]):
             self.limit
         )
 
-def get_s3_credentials(credentials_yaml_file: Union[str,os.PathLike]) -> dict[str,str]:
-    with open(credentials_yaml_file, 'r') as f:
-        return yaml.safe_load(f)
-    
-
-def get_fs(url: str, s3_credentials: dict[str,Optional[str]]) -> fsspec.AbstractFileSystem:
-    """Returns a filesystem configured to use the credentials in the provided YAML file.
+def _get_fs(url: str, s3_credentials: dict[str,Optional[str]] | None, asynchronous: bool = False) -> fsspec.AbstractFileSystem:
+    """Returns a filesystem configured to use the options given.
 
     Args:
         url: The URL to use to determine the protocol.
         s3_credentials (dict): possible s3 credentials to use
+        block_size (int, optional): The block size to use for the filesystem. Defaults to 5 * 2**20.
+        asynchronous (bool, optional): Whether to return an asynchronous filesystem. Defaults to False.
 
     Returns:
         fs (fsspec.AbstractFileSystem:): The filesystem object.
@@ -117,17 +114,14 @@ def get_fs(url: str, s3_credentials: dict[str,Optional[str]]) -> fsspec.Abstract
         protocol = ""
     else:
         protocol = protocol.group(0)
-    if protocol == "s3":
+    if protocol == "s3" and s3_credentials is not None:
         kwargs = dict(
             key=s3_credentials['aws_access_key_id'], 
             secret=s3_credentials['aws_secret_access_key'], 
             endpoint_url=s3_credentials['endpoint_url'])
     else:
         kwargs = dict()
-    return fsspec.filesystem(protocol, **kwargs)
-
-def get_aio_s3_client(s3_credentials: dict[str,Any]) -> aiobotocore.session.ClientCreatorContext:
-    return aiobotocore.session.get_session().create_client('s3', **s3_credentials)
+    return fsspec.filesystem(protocol, asynchronous=asynchronous, **kwargs)
 
 def derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
     return zipfile_url + ".offsets.sqlite3"
@@ -135,15 +129,19 @@ def derive_sqlite_url_from_zip_url(zipfile_url: str) -> str:
 def derive_sqlite_file_path(sqlite_url: str, sqlite_dir: str) -> str:
     return f"{sqlite_dir}/{os.path.basename(sqlite_url)}"
 
-def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentials: dict[str,Any] = {}):
+def ensure_sqlite_database_exists(sqlite_url: str, sqlite_dir: str, s3_credentials: dict[str,Any] | None):
     sqfpath = derive_sqlite_file_path(sqlite_url, sqlite_dir)
     if not os.path.exists(sqfpath):
         os.makedirs(os.path.dirname(sqfpath), exist_ok=True)
-        get_fs(sqlite_url, s3_credentials).get_file(sqlite_url, sqfpath, callback=TqdmCallback(tqdm_kwargs=dict(unit='b', unit_scale=True, dynamic_ncols=True))) # type: ignore
+        _get_fs(sqlite_url, s3_credentials).get_file(sqlite_url, sqfpath, callback=TqdmCallback(tqdm_kwargs=dict(unit='b', unit_scale=True, dynamic_ncols=True))) # type: ignore
 
-def _open_s3_zip(zip_url: str, cache_dir: str, s3_credentials: dict[str,Any]):
+def get_s3_credentials(s3_credentials_yaml_file: Union[str,os.PathLike]) -> dict[str,Optional[str]]:
+    with open(s3_credentials_yaml_file, 'r') as f:
+        return yaml.safe_load(f)
+
+def _open_s3_zip(zip_url: str, cache_dir: str, s3_credentials: dict[str,Any] | None, block_size: int) -> fsspec.spec.AbstractBufferedFile:
     cache_loc = cache_dir+"/"+os.path.basename(zip_url)
-    return get_fs(zip_url, s3_credentials).open(zip_url, cache_type="smmap", cache_options=dict(location=cache_loc+".cache", index_location=cache_loc+".cache-index"), fill_cache=False)
+    return _get_fs(zip_url, s3_credentials).open(zip_url, "rb", cache_type="smmap", block_size=block_size, cache_options=dict(location=cache_loc+".cache", index_location=cache_loc+".cache-index"), fill_cache=False) # type: ignore
 
 def _open_file_zip(zip_url: str):
     return open(zip_url, 'rb')
@@ -155,7 +153,7 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
 
-    def __init__(self, zip_url:str, cache_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, *args, **kwargs):
+    def __init__(self, zip_url:str, cache_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, block_size: int = 5 * 2**20, transform: Callable[['S3EDZipMapDataset',list[Tuple[int,ZipInfo]]], list[T_co]] = possibly_parallel_extract_transform, *args, **kwargs): # type: ignore
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
@@ -167,12 +165,16 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         if sqlite_url is None:
             sqlite_url = derive_sqlite_url_from_zip_url(zip_url)
         if s3_credentials_yaml_file is not None:
-            self.s3_credentials = get_s3_credentials(s3_credentials_yaml_file)
+            s3_credentials = get_s3_credentials(s3_credentials_yaml_file)
         else:
-            self.s3_credentials = {}
+            self.s3_credentials = None
         if zip_url.startswith('s3:'):
             (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
-            open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials)
+            open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials, block_size)
+            with open_zip() as f:
+                fs = f.fs
+                self.acache: SharedMMapCache = open_zip().cache # type: ignore
+                self.acache.afetcher = functools.partial(fs._cat_file, zip_url, None) # type: ignore
         else:
             self.bucket = None
             self.path = None
@@ -181,18 +183,11 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         super().__init__(
             open_zip=open_zip,
             open_con=functools.partial(_open_sqlite,derive_sqlite_file_path(sqlite_url, cache_dir)),
+            transform=transform,
             *args, **kwargs)
 
-    def aio_get_s3_client(self):
-        return get_aio_s3_client(s3_credentials=self.s3_credentials)
-    
-    async def _aio_get_range(self, client, start: int, end: int) -> bytes:
-        response = await client.get_object(Bucket=self.bucket, Key=self.path, Range=f"bytes={start}-{end}")
-        async with response['Body'] as stream:
-            return await stream.read()
-        
-    async def aio_extract_file(self, client, offset, size) -> BytesIO:
-        compressed_bytes = await self._aio_get_range(client, offset, offset+size-1)
+    async def _a_extract_file(self, offset, size) -> BytesIO:
+        compressed_bytes = await self.acache._afetch(offset, offset+size-1)
         _,_, uncompressed_chunks = next(stream_unzip([compressed_bytes]))
         uncompressed_bytes = BytesIO()
         for uncompressed_chunk in uncompressed_chunks:
@@ -200,9 +195,8 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         uncompressed_bytes.seek(0)
         return uncompressed_bytes
     
-    async def _extract_in_parallel(self, infos: Iterable[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
-        async with self.aio_get_s3_client() as client:
-            return await asyncio.gather(*[self.aio_extract_file(client, zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
+    async def _a_extract_files_in_parallel(self, infos: Iterable[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
+        return await asyncio.gather(*[self._a_extract_file(zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
         
     def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
         if len(infos)==1 or self.bucket is None:
@@ -210,21 +204,23 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         if loop is None and asyncio._get_running_loop() is not None:
             loop = asyncio.get_running_loop()
         if loop is not None:
-            return asyncio.run_coroutine_threadsafe(self._extract_in_parallel(infos, max_extra), loop).result()
-        return asyncio.run(self._extract_in_parallel(infos))
+            return asyncio.run_coroutine_threadsafe(self._a_extract_files_in_parallel(infos, max_extra), loop).result()
+        return asyncio.run(self._a_extract_files_in_parallel(infos))
     
     def __getstate__(self):
         return (
             super().__getstate__(), 
             self.s3_credentials,
             self.bucket,
-            self.path
+            self.path,
+            self.acache
         )
 
     def __setstate__(self, state):
         (super_state, 
          self.s3_credentials, 
          self.bucket, 
-         self.path) = state
+         self.path,
+         self.acache) = state
         super().__setstate__(super_state)
 
