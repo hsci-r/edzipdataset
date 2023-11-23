@@ -6,7 +6,7 @@ import pickle
 import shutil
 import tempfile
 from typing import Tuple
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 from zipfile import ZipFile, ZipInfo
 
 from edzip.sqlite import create_sqlite_directory_from_zip
@@ -43,10 +43,10 @@ def s3(tmpdir):
     server.start()
     zfbuffer = BytesIO()
     with ZipFile(zfbuffer, "w") as zf:
-            zf.writestr("test.txt", "Hello, world!")
-            zf.writestr("test2.txt", "Hello again!")
-            zf.writestr("test3.txt", "Goodbye!")
-            create_sqlite_directory_from_zip(zf, tmpdir+"/test.zip.offsets.sqlite3").close()    
+        zf.writestr("test.txt", "Hello, world!")
+        zf.writestr("test2.txt", "Hello again!")
+        zf.writestr("test3.txt", "Goodbye!")
+        create_sqlite_directory_from_zip(zf, tmpdir+"/test.zip.offsets.sqlite3").close()    
     if "AWS_SECRET_ACCESS_KEY" not in os.environ:
         os.environ["AWS_SECRET_ACCESS_KEY"] = "foo"
     if "AWS_ACCESS_KEY_ID" not in os.environ:
@@ -58,6 +58,12 @@ def s3(tmpdir):
     client = get_boto3_client()
     client.create_bucket(Bucket="test", ACL="public-read")
     client.put_object(Bucket="test", Key="test.zip", Body=zfbuffer.getvalue())
+    zfbuffer = BytesIO()
+    with ZipFile(zfbuffer, "w") as zf:
+            for i in range(500000):
+                zf.writestr(f"test{i}.txt", f"{i}")
+            create_sqlite_directory_from_zip(zf, tmpdir+"/large.zip.offsets.sqlite3").close()    
+    client.put_object(Bucket="test", Key="large.zip", Body=zfbuffer.getvalue())
     yield
     server.stop()    
 
@@ -97,17 +103,17 @@ def test_s3hostededzipdataset_as_iterabledataset(tmpdir, s3):
 
 
 
-def test_s3hostededzipdataset_async(tmpdir, s3, monkeypatch):
+def test_s3hostededzipdataset_async(tmpdir, s3):
     transform = Mock(side_effect=possibly_parallel_extract_transform)
-    mrun = Mock(wraps=asyncio.run)
-    monkeypatch.setattr(asyncio, "run", mrun)
-    ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/test.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", transform=transform)
-    assert len(ds) == 3
-    assert ds[0].getvalue() == b"Hello, world!"
-    assert ds[1].getvalue() == b"Hello again!"
-    assert ds[2].getvalue() == b"Goodbye!"
+    ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/large.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", block_size=1024, transform=transform)
+    mfetcher = Mock(wraps=ds.acache.afetcher)
+    ds.acache.afetcher = mfetcher
+    assert len(ds) == 500000
+    assert ds[0].getvalue() == b"0"
+    assert ds[1].getvalue() == b"1"
+    assert ds[2].getvalue() == b"2"
     assert transform.call_count == 3
-    mrun.assert_not_called()
-    assert list(map(lambda x: x.getvalue(), ds.__getitems__([0,1,2]))) == [b"Hello, world!", b"Hello again!", b"Goodbye!"]
+    mfetcher.assert_not_called()
+    assert list(map(lambda x: x.getvalue(), ds.__getitems__([0,430,20000,430000]))) == [b"0", b"430", b"20000", b"430000"]
     assert transform.call_count == 4
-    mrun.assert_called_once()
+    assert mfetcher.mock_calls == [call(18432, 19456), call(936960, 937984), call(21277696, 21278720)]

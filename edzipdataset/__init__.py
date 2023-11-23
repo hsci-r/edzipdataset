@@ -200,14 +200,10 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     async def _a_extract_files_in_parallel(self, infos: Iterable[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
         return await asyncio.gather(*[self._a_extract_file(zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
         
-    def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128, loop: Optional[AbstractEventLoop] = None) -> list[BytesIO]:
+    def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128) -> list[BytesIO]:
         if len(infos)==1 or self.bucket is None:
             return [BytesIO(self.edzip.read(zinfo)) for zinfo in infos]
-        if loop is None and asyncio._get_running_loop() is not None:
-            loop = asyncio.get_running_loop()
-        if loop is not None:
-            return asyncio.run_coroutine_threadsafe(self._a_extract_files_in_parallel(infos, max_extra), loop).result()
-        return asyncio.run(self._a_extract_files_in_parallel(infos))
+        return asyncio.run_coroutine_threadsafe(self._a_extract_files_in_parallel(infos, max_extra), fsspec.asyn.get_loop()).result()
     
     def __getstate__(self):
         return (
