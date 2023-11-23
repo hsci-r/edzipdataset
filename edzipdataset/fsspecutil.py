@@ -5,17 +5,20 @@ import os
 import time
 from typing import Any, Awaitable, Callable, Tuple
 from fsspec.caching import Fetcher, MMapCache, register_cache, caches
+import multiprocessing_utils
 
 class SharedMMapCache(MMapCache):
 
+    _lock = multiprocessing_utils.SharedLock()
     name="smmap"
 
     def __init__(self, blocksize: int, fetcher: Fetcher, size: int, location: str, index_location: str, afetcher: Callable[[int, int], Awaitable[bytes]] | None = None, parallel_timeout = 30) -> None:
-        super().__init__(blocksize, fetcher, size, location, None)
         self.index_location = index_location
         self.parallel_timeout = parallel_timeout
         self.afetcher = afetcher
-        self._index = self._makeindex()
+        with self._lock:
+            super().__init__(blocksize, fetcher, size, location, None)
+            self._index = self._makeindex()
 
     def _makeindex(self) -> mmap.mmap | bytearray:
         if self.size == 0:

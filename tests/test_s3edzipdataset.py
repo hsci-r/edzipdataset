@@ -16,7 +16,7 @@ import pytest
 from moto.moto_server.threaded_moto_server import ThreadedMotoServer
 
 from edzipdataset.dsutil import DatasetToIterableDataset
-from multiprocessing import Process, set_start_method
+from multiprocessing import Process, get_context
 
 port = 5555
 endpoint_url = "http://127.0.0.1:%s/" % port
@@ -122,12 +122,10 @@ def _process(ds, i, sleep):
     time.sleep(sleep)
     assert list(map(lambda x: x.getvalue(), ds.__getitems__([50,20100,430100]))) == [b"50", b"20100", b"430100"]
 
-set_start_method('fork')
-
-
 def test_s3hostededzipdataset_async_multiprocess(tmpdir, s3):
+    fctx = get_context('fork')
     ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/large.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", block_size=1024, transform=possibly_parallel_extract_transform)
-    ps = [Process(target=_process, args=(ds, i, i/8)) for i in range(20)]
+    ps = [fctx.Process(target=_process, args=(ds, i, i/8)) for i in range(20)]
     for p in ps:
         p.start()
     _process(ds, 25, 0.5)
