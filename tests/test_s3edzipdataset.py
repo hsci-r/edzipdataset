@@ -5,6 +5,7 @@ import os
 import pickle
 import shutil
 import tempfile
+import time
 from typing import Tuple
 from unittest.mock import Mock, call
 from zipfile import ZipFile, ZipInfo
@@ -15,6 +16,7 @@ import pytest
 from moto.moto_server.threaded_moto_server import ThreadedMotoServer
 
 from edzipdataset.dsutil import DatasetToIterableDataset
+from multiprocessing import Process, set_start_method
 
 port = 5555
 endpoint_url = "http://127.0.0.1:%s/" % port
@@ -106,14 +108,28 @@ def test_s3hostededzipdataset_as_iterabledataset(tmpdir, s3):
 def test_s3hostededzipdataset_async(tmpdir, s3):
     transform = Mock(side_effect=possibly_parallel_extract_transform)
     ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/large.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", block_size=1024, transform=transform)
-    mfetcher = Mock(wraps=ds.acache.afetcher)
-    ds.acache.afetcher = mfetcher
     assert len(ds) == 500000
     assert ds[0].getvalue() == b"0"
     assert ds[1].getvalue() == b"1"
     assert ds[2].getvalue() == b"2"
     assert transform.call_count == 3
-    mfetcher.assert_not_called()
     assert list(map(lambda x: x.getvalue(), ds.__getitems__([0,430,20000,430000]))) == [b"0", b"430", b"20000", b"430000"]
     assert transform.call_count == 4
-    assert mfetcher.mock_calls == [call(18432, 19456), call(936960, 937984), call(21277696, 21278720)]
+
+
+def _process(ds, i, sleep):
+    ds.__getitems__([i,430*i,20000+i,430000-5*i])
+    time.sleep(sleep)
+    assert list(map(lambda x: x.getvalue(), ds.__getitems__([50,20100,430100]))) == [b"50", b"20100", b"430100"]
+
+set_start_method('fork')
+
+
+def test_s3hostededzipdataset_async_multiprocess(tmpdir, s3):
+    ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/large.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", block_size=1024, transform=possibly_parallel_extract_transform)
+    ps = [Process(target=_process, args=(ds, i, i/8)) for i in range(20)]
+    for p in ps:
+        p.start()
+    _process(ds, 25, 0.5)
+    for p in ps:
+        p.join()
