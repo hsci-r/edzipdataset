@@ -184,6 +184,7 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         else:
             self.bucket = None
             self.path = None
+            self.zip_size = None
             open_zip = functools.partial(_open_file_zip, zip_url)
         ensure_sqlite_database_exists(sqlite_url, cache_dir, self.s3_credentials)
         super().__init__(
