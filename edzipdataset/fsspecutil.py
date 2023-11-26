@@ -115,6 +115,11 @@ class SharedMMapCache(MMapCache):
             await self._await(waiting, need)
         return self.cache[start:end]
 
+
+    def fill(self, start: int, data: bytes) -> None:
+        self.cache[start:start+len(data)] = data
+        for i in range(start // self.blocksize, (start + len(data)) // self.blocksize):
+            self._index[i] = 2
     
     def __getstate__(self):
         state = super().__getstate__()

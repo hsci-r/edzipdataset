@@ -1,4 +1,4 @@
-from asyncio import AbstractEventLoop
+from asyncio import AbstractEventLoop, Future
 import asyncio
 import functools
 from io import BytesIO, IOBase
@@ -194,16 +194,16 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             *args, **kwargs)
         
     @property
-    def _a_cached_fetch(self):
+    def acache(self):
         if not hasattr(self._plocal, 'acache'):
             afetcher = functools.partial(_get_fs(self.zip_url, self.s3_credentials)._cat_file, self.zip_url, None) # type: ignore
             cache_loc, cache_index_loc = _get_cache_locs(self.zip_url, self.cache_dir)
             self._plocal.acache = SharedMMapCache(self.block_size, None, self.zip_size, cache_loc, cache_index_loc, afetcher) # type: ignore
-        return self._plocal.acache._afetch
+        return self._plocal.acache
 
    
     async def _a_extract_file(self, offset, size) -> BytesIO:
-        compressed_bytes = await self._a_cached_fetch(offset, offset+size-1)
+        compressed_bytes = await self.acache._afetch(offset, offset+size-1)
         _,_, uncompressed_chunks = next(stream_unzip([compressed_bytes]))
         uncompressed_bytes = BytesIO()
         for uncompressed_chunk in uncompressed_chunks:
@@ -214,10 +214,28 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     async def _extract_in_parallel(self, infos: Iterable[ZipInfo], max_extra:int = 128) -> list[BytesIO]:
         return await asyncio.gather(*[self._a_extract_file(zinfo.header_offset, zinfo.compress_size+sizeFileHeader+max_extra) for zinfo in infos])
         
-    def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128) -> list[BytesIO]:
+    def extract_possibly_in_parallel(self, infos: list[ZipInfo], max_extra: int = 128, loop: AbstractEventLoop | None = None) -> list[BytesIO]: # can't give default loop here as it picks the loop from the main thread
         if len(infos)==1 or self.bucket is None:
             return [BytesIO(self.edzip.read(zinfo)) for zinfo in infos]
-        return asyncio.run_coroutine_threadsafe(self._extract_in_parallel(infos, max_extra), fsspec.asyn.get_loop()).result()
+        if loop is None:
+            loop = fsspec.asyn.get_loop()
+        return asyncio.run_coroutine_threadsafe(self._extract_in_parallel(infos, max_extra), loop).result()
+    
+    async def _a_cache_file(self):
+        fs: S3FileSystem = _get_fs(self.zip_url, self.s3_credentials) # type: ignore
+        f = await fs.open_async(self.zip_url, "rb")
+        while f.loc < self.zip_size: # type: ignore
+            loc = f.loc
+            data = await f.read(self.block_size*2**4*5)
+            self.acache.fill(loc, data)
+        self.acache._index[-1] = 2
+
+    def cache_file(self, loop: AbstractEventLoop | None = None): # can't give default loop here as it picks the loop from the main thread
+        if self.bucket is not None:
+            if loop is None:
+                loop = fsspec.asyn.get_loop()
+            return asyncio.run_coroutine_threadsafe(self._a_cache_file(), loop)
+            
     
     def __getstate__(self):
         return (

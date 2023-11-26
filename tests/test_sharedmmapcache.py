@@ -100,3 +100,9 @@ class TestSharedMMapCache(unittest.TestCase):
     
         asyncio.run(atest())
         
+    def test_fill(self):
+        c = SharedMMapCache(blocksize=1024, fetcher=None, afetcher=None, size=65536, location=self.dir+"/cache3", index_location=self.dir+"/cache-index3") # type: ignore
+        c.fill(0,b"1"*1024)
+        c.fill(1024,b"1"*1024)
+        c._fetch(0,1023)
+        c._fetch(1024,1080)

@@ -69,6 +69,12 @@ def s3(tmpdir):
     yield
     server.stop()    
 
+@pytest.fixture(autouse=True)
+def clear_cache(tmpdir):
+    for file in os.listdir(tmpdir):
+        if file.endswith(".cache") or file.endswith(".cache-index"):
+            os.remove(os.path.join(tmpdir, file))
+
 def _transform(edmd: S3HostedEDZipMapDataset, infos:list[Tuple[int,ZipInfo]]): 
     return [edmd.edzip.open(zinfo).read()+str(idx).encode() for idx,zinfo in infos]
 
@@ -115,6 +121,23 @@ def test_s3hostededzipdataset_async(tmpdir, s3):
     assert transform.call_count == 3
     assert list(map(lambda x: x.getvalue(), ds.__getitems__([0,430,20000,430000]))) == [b"0", b"430", b"20000", b"430000"]
     assert transform.call_count == 4
+
+
+def test_s3hostededzipdataset_fill(tmpdir, s3):
+    transform = Mock(side_effect=possibly_parallel_extract_transform)
+    ds = S3HostedEDZipMapDataset[BytesIO]("s3://test/large.zip", tmpdir, s3_credentials_yaml_file=tmpdir+"/s3_secret.yaml", block_size=65536, transform=transform)
+    ds.cache_file().result(timeout=10) # type: ignore
+    ds.acache.fetcher = None # type: ignore
+    ds.acache.afetcher = None
+    assert len(ds) == 500000
+    assert ds[0].getvalue() == b"0"
+    assert ds[1].getvalue() == b"1"
+    assert ds[2].getvalue() == b"2"
+    assert transform.call_count == 3
+    assert list(map(lambda x: x.getvalue(), ds.__getitems__([0,430,20000,430000]))) == [b"0", b"430", b"20000", b"430000"]
+    assert transform.call_count == 4
+    for i in ds.acache._index:
+        assert i == b'\x02'
 
 
 def _process(ds, i, sleep):
