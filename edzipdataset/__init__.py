@@ -143,9 +143,13 @@ def _get_cache_locs(zip_url: str, cache_dir: str) -> Tuple[str,str]:
     cache_loc_base = cache_dir+"/"+os.path.basename(zip_url)
     return (cache_loc_base+".cache", cache_loc_base+".cache-index")
 
-def _open_s3_zip(zip_url: str, cache_dir: str, s3_credentials: dict[str,Any] | None, block_size: int) -> fsspec.spec.AbstractBufferedFile:
+def _open_s3_zip(zip_url: str, cache_dir: str, s3_credentials: dict[str,Any] | None, block_size: int, disable_caching: bool) -> fsspec.spec.AbstractBufferedFile:
     cache_loc, cache_index_loc = _get_cache_locs(zip_url, cache_dir)
-    return _get_fs(zip_url, s3_credentials).open(zip_url, "rb", cache_type="smmap", block_size=block_size, cache_options=dict(location=cache_loc, index_location=cache_index_loc), fill_cache=False) # type: ignore
+    if disable_caching:
+        return _get_fs(zip_url, s3_credentials).open(zip_url, "rb", cache_type="readahead", block_size=block_size, fill_cache=False) # type: ignore
+    else:
+        return _get_fs(zip_url, s3_credentials).open(zip_url, "rb", cache_type="smmap", block_size=block_size, cache_options=dict(location=cache_loc, index_location=cache_index_loc), fill_cache=False) # type: ignore
+    
 
 def _open_file_zip(zip_url: str):
     return open(zip_url, 'rb')
@@ -158,7 +162,7 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
     """A map dataset class for reading data from an S3 hosted zip file with an external sqlite3 directory."""
 
 
-    def __init__(self, zip_url:str, cache_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, block_size: int = 65536, transform: Callable[['S3EDZipMapDataset',list[Tuple[int,ZipInfo]]], list[T_co]] = possibly_parallel_extract_transform, *args, **kwargs): # type: ignore
+    def __init__(self, zip_url:str, cache_dir: str, sqlite_url: Optional[str] = None, s3_credentials_yaml_file: Optional[Union[str,os.PathLike]] = None, block_size: int = 65536, transform: Callable[['S3EDZipMapDataset',list[Tuple[int,ZipInfo]]], list[T_co]] = possibly_parallel_extract_transform, disable_caching: bool = False, *args, **kwargs): # type: ignore
         """Creates a new instance of the S3HostedEDZipDataset class.
 
             Args:
@@ -177,10 +181,11 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         self.zip_url = zip_url
         self.cache_dir = cache_dir
         self.block_size = block_size
+        self.disable_caching = disable_caching
         if zip_url.startswith('s3:'):
             (self.bucket, self.path) = re.sub('^s3:/?/?', '', zip_url).split('/',1)
             self.zip_size = _get_fs(zip_url, self.s3_credentials).info(zip_url)['size']
-            open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials, block_size)
+            open_zip = functools.partial(_open_s3_zip, zip_url, cache_dir, self.s3_credentials, block_size, disable_caching)
         else:
             self.bucket = None
             self.path = None
@@ -194,16 +199,25 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             *args, **kwargs)
         
     @property
-    def acache(self):
+    def _acache(self):
         if not hasattr(self._plocal, 'acache'):
             afetcher = functools.partial(_get_fs(self.zip_url, self.s3_credentials)._cat_file, self.zip_url, None) # type: ignore
             cache_loc, cache_index_loc = _get_cache_locs(self.zip_url, self.cache_dir)
             self._plocal.acache = SharedMMapCache(self.block_size, None, self.zip_size, cache_loc, cache_index_loc, afetcher) # type: ignore
         return self._plocal.acache
 
-   
+
+    @property
+    def _afetcher(self):
+        if not hasattr(self._plocal, 'afetcher'):
+            if self.disable_caching:
+                self._plocal.afetcher = functools.partial(_get_fs(self.zip_url, self.s3_credentials)._cat_file, self.zip_url, None) # type: ignore
+            else:
+                self._plocal.afetcher = self._acache._afetch
+        return self._plocal.afetcher
+
     async def _a_extract_file(self, offset, size) -> BytesIO:
-        compressed_bytes = await self.acache._afetch(offset, offset+size-1)
+        compressed_bytes = await self._afetcher(offset, offset+size-1)
         _,_, uncompressed_chunks = next(stream_unzip([compressed_bytes]))
         uncompressed_bytes = BytesIO()
         for uncompressed_chunk in uncompressed_chunks:
@@ -227,11 +241,11 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
         while f.loc < self.zip_size: # type: ignore
             loc = f.loc
             data = await f.read(self.block_size*2**4*5)
-            self.acache.fill(loc, data)
-        self.acache._index[-1] = 2
+            self._acache.fill(loc, data)
+        self._acache._index[-1] = 2
 
     def cache_file(self, loop: AbstractEventLoop | None = None): # can't give default loop here as it picks the loop from the main thread
-        if self.bucket is not None:
+        if self.bucket is not None and not self.disable_caching:
             if loop is None:
                 loop = fsspec.asyn.get_loop()
             return asyncio.run_coroutine_threadsafe(self._a_cache_file(), loop)
@@ -246,7 +260,8 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
             self.zip_url,
             self.zip_size,
             self.cache_dir,
-            self.block_size
+            self.block_size,
+            self.disable_caching,
         )
 
     def __setstate__(self, state):
@@ -257,7 +272,8 @@ class S3HostedEDZipMapDataset(EDZipMapDataset[T_co]):
          self.zip_url,
          self.zip_size,
          self.cache_dir,
-         self.block_size) = state
+         self.block_size,
+         self.disable_caching,) = state
         self._plocal = ProcessLocal()
         super().__setstate__(super_state)
 
