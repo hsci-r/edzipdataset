@@ -16,6 +16,8 @@ class ProcessLocal(object):
             self._local = SimpleNamespace()  # pragma: no cover
 
     def __getattr__(self, item):
+        if item == '_local':
+            return super(ProcessLocal, self).__getattr__(item)
         self._thread_init()
         return getattr(self._local, item)
 
