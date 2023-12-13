@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset.dsutil import DatasetToIterableDataset
+from hscitorchutil.dataset import DatasetToIterableDataset
 
 class TestDatasetToIterableDataset(unittest.TestCase):
     def setUp(self):

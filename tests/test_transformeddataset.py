@@ -3,7 +3,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset.dsutil import TransformedMapDataset
+from hscitorchutil.dataset import TransformedMapDataset
 import pickle
 
 def _transform(x):

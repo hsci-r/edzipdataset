@@ -8,7 +8,7 @@ from unittest.mock import Mock, call
 
 import fsspec
 from fsspec.implementations.http import HTTPFileSystem
-from edzipdataset.fsspecutil import SharedMMapCache
+from hscitorchutil.fsspec import SharedMMapCache
 import pickle
 
 

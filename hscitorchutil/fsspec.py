@@ -173,6 +173,8 @@ def get_filesystem(urlpath: str, storage_options: dict[str, Any] | None = None) 
 
 
 def get_cache(fs: AbstractFileSystem, urlpath: str, size: int, cache_dir: str, blocksize: int, parallel_timeout: int, cache_mapper: AbstractCacheMapper) -> SharedMMapCache:
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
     def _cat_file_fetcher(fs: AbstractFileSystem, urlpath: str, start: int, end: int) -> bytes:
         return fs.cat_file(urlpath, start=start, end=end)
 
@@ -252,6 +254,8 @@ def cache_locally_if_remote(urlpath: str, storage_options: dict[str, Any] | None
     if cache_dir is None:
         raise ValueError(
             "If you want to use a non-local filesystem, you need to specify a cache_dir")
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
     lpath = os.path.join(
         cache_dir, cache_mapper(urlpath))
     if not os.path.exists(lpath):

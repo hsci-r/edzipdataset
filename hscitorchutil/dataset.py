@@ -1,5 +1,5 @@
 import random
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, Sequence, TypeVar
 import torch
 from torch.utils.data import Dataset
 import logging

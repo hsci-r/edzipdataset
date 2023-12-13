@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from edzipdataset.dsutil import ShuffledMapDataset
+from hscitorchutil.dataset import ShuffledMapDataset
 import pickle
 
 class TestShuffledMapDataset(unittest.TestCase):
