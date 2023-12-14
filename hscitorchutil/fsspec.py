@@ -203,7 +203,7 @@ def prefetch(urlpath: str, size: int, cache_dir: str, storage_options: dict[str,
             data = await f.read(block_size*2**4*5)  # type: ignore
             cache.fill(loc, data)
         cache._index[-1] = 2
-    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop)
+    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fsspec.asyn.get_loop())
 
 
 def _get_afetcher(urlpath: str, size: int, storage_options: dict[str, Any] | None = None, parallel_timeout=30, cache_dir: str | None = None, blocksize: int = 65536, cache_mapper: AbstractCacheMapper = PathCacheMapper()):
