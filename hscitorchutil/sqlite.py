@@ -20,10 +20,11 @@ def _identity(x: Sequence[Tuple]) -> Sequence[Tuple]:
 
 class SQLiteDataset(Dataset[T2_co], Generic[T_co, T2_co]):
     # type: ignore
-    def __init__(self, sqlite_filename: str, table_name: str, index_column: str, columns_to_return: str, transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = _identity):
+    def __init__(self, sqlite_filename: str, table_name: str, index_column: str, columns_to_return: str, id_column: str | None = None, transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = _identity):
         self.sqlite_filename = sqlite_filename
         self.table_name = table_name
         self.index_column = index_column
+        self.id_column = id_column
         self.columns_to_return = columns_to_return
         self.transform = transform
         self.sqlite = sqlite3.connect(sqlite_filename)
@@ -33,14 +34,20 @@ class SQLiteDataset(Dataset[T2_co], Generic[T_co, T2_co]):
     def __len__(self):
         return self._len
 
-    def __getitem__(self, idx: int) -> T2_co:
+    def __getitem__(self, idx: int | str) -> T2_co:
         return self.__getitems__([idx])[0]
 
-    def __getitems__(self, idxs: Sequence[int]) -> Sequence[T2_co]:
-        return self.transform(
-            self.sqlite.execute(f"SELECT {self.columns_to_return} FROM {self.table_name} WHERE {self.index_column} IN (%s)" % ','.join(
-                '?' * len(idxs)), idxs).fetchall(),
-        )
+    def __getitems__(self, idxs: Sequence[int | str]) -> Sequence[T2_co]:
+        if isinstance(idxs[0], int):
+            return self.transform(
+                self.sqlite.execute(f"SELECT {self.columns_to_return} FROM {self.table_name} WHERE {self.index_column} IN (%s)" % ','.join(
+                    '?' * len(idxs)), idxs).fetchall(),
+            )
+        else:
+            return self.transform(
+                self.sqlite.execute(f"SELECT {self.columns_to_return} FROM {self.table_name} WHERE {self.id_column} IN (%s)" % ','.join(
+                    '?' * len(idxs)), idxs).fetchall(),
+            )
 
     def __setstate__(self, state):
         (
@@ -48,6 +55,7 @@ class SQLiteDataset(Dataset[T2_co], Generic[T_co, T2_co]):
             self.table_name,
             self.index_column,
             self.columns_to_return,
+            self.id_column,
             self.transform,
             self._len
         ) = state
@@ -59,6 +67,7 @@ class SQLiteDataset(Dataset[T2_co], Generic[T_co, T2_co]):
             self.table_name,
             self.index_column,
             self.columns_to_return,
+            self.id_column,
             self.transform,
             self._len
         )
@@ -84,6 +93,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                  table_name: str, 
                  index_column: str,
                  columns_to_return: str,
+                 id_column: str | None = None,
                  storage_options: dict = dict(),
                  batch_size: int = 64,
                  num_workers: int = 0,
@@ -102,6 +112,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
         self.table_name = table_name
         self.index_column = index_column
         self.columns_to_return = columns_to_return
+        self.id_column = id_column
 
         self.train_transform = train_transform
         self.test_transform = test_transform
@@ -131,6 +142,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                 self.table_name, 
                 self.index_column,
                 self.columns_to_return,
+                self.id_column,
                 self.train_transform)
         if (stage is None or stage == "fit" or stage == "validate") and self.val_dataset is None:
             self.val_dataset = SQLiteDataset(cache_locally_if_remote(
@@ -138,6 +150,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                 self.table_name, 
                 self.index_column,
                 self.columns_to_return,
+                self.id_column,
                 self.test_transform)
         if (stage is None or stage == "test") and self.test_dataset is None:
             self.test_dataset = SQLiteDataset(cache_locally_if_remote(
@@ -145,6 +158,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                 self.table_name, 
                 self.index_column,
                 self.columns_to_return,
+                self.id_column,
                 self.test_transform)
 
     def train_dataloader(self) -> DataLoader[T2_co]:
