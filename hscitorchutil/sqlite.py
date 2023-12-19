@@ -114,8 +114,8 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
         self.columns_to_return = columns_to_return
         self.id_column = id_column
 
-        self.train_transform = train_transform
-        self.test_transform = test_transform
+        self.train_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = train_transform
+        self.test_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = test_transform
         self.prepare_data_per_node = prepare_data_per_node
         self.collate_fn = collate_fn
         self.train_dataset = None
