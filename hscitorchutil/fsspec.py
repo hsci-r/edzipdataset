@@ -7,12 +7,14 @@ import os
 import time
 from typing import Any, Awaitable, Callable, Iterable, Tuple, Coroutine
 import fsspec
+import fsspec.implementations.local
 import fsspec.asyn
-from fsspec import AbstractFileSystem
+from fsspec.asyn import AsyncFileSystem
 from fsspec.callbacks import TqdmCallback
 from fsspec.implementations.cached import SimpleCacheFileSystem
 from fsspec.implementations.cache_mapper import AbstractCacheMapper
 from fsspec.caching import Fetcher, MMapCache, register_cache, caches
+from morefs.asyn_local import AsyncLocalFileSystem
 import multiprocessing_utils
 import yaml
 
@@ -134,8 +136,7 @@ class SharedMMapCache(MMapCache):
         need = self._get_need(start, end)
         while need:
             to_fetch, waiting = self._get_to_fetch(need)
-            # type: ignore
-            datas = await asyncio.gather(*[self.afetcher(sstart, send) for sstart, send, _ in to_fetch])
+            datas = await asyncio.gather(*[self.afetcher(sstart, send) for sstart, send, _ in to_fetch]) # type: ignore # noqa
             for (sstart, send, cis), data in zip(to_fetch, datas):
                 self.cache[sstart:send] = data
                 for i in cis:
@@ -166,17 +167,20 @@ class SharedMMapCache(MMapCache):
 register_cache(SharedMMapCache)
 
 
-def get_filesystem(urlpath: str, storage_options: dict[str, Any] | None = None) -> AbstractFileSystem:
+def get_async_filesystem(urlpath: str, storage_options: dict[str, Any] | None = None) -> AsyncFileSystem:
     fs, _, _ = fsspec.get_fs_token_paths(
         urlpath, storage_options=storage_options)
+    if isinstance(fs, fsspec.implementations.local.LocalFileSystem):
+        fs = AsyncLocalFileSystem()
+    if not fs.async_impl:
+        raise ValueError("Unsupported non-async filesystem: %s" % fs)
     return fs
 
-
-def get_cache(fs: AbstractFileSystem, urlpath: str, size: int, cache_dir: str, blocksize: int, parallel_timeout: int, cache_mapper: AbstractCacheMapper) -> SharedMMapCache:
+def get_cache(fs: AsyncFileSystem, urlpath: str, size: int, cache_dir: str, blocksize: int, parallel_timeout: int, cache_mapper: AbstractCacheMapper) -> SharedMMapCache:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir, exist_ok=True)
-    def _cat_file_fetcher(fs: AbstractFileSystem, urlpath: str, start: int, end: int) -> bytes:
-        return fs.cat_file(urlpath, start=start, end=end)
+    def _cat_file_fetcher(fs: AsyncFileSystem, urlpath: str, start: int, end: int) -> bytes:
+        return fs.cat_file(urlpath, start=start, end=end) # type: ignore
 
     async def _cat_file_afetcher(_, urlpath: str, start: int, end: int) -> bytes:
         return await fs._cat_file(urlpath, start=start, end=end)
@@ -191,8 +195,12 @@ def get_cache(fs: AbstractFileSystem, urlpath: str, size: int, cache_dir: str, b
         parallel_timeout=parallel_timeout)
 
 
-def prefetch(urlpath: str, size: int, cache_dir: str, storage_options: dict[str, Any] | None = None, blocksize: int = 65536, parallel_timeout: int = 30, cache_mapper: AbstractCacheMapper = PathCacheMapper()) -> futures.Future[None]:
-    fs = get_filesystem(urlpath, storage_options=storage_options)
+def prefetch_if_remote(urlpath: str, size: int, cache_dir: str, storage_options: dict[str, Any] | None = None, blocksize: int = 65536, parallel_timeout: int = 30, cache_mapper: AbstractCacheMapper = PathCacheMapper()) -> futures.Future[None]:
+    fs = get_async_filesystem(urlpath, storage_options=storage_options)
+    if getattr(fs, "local_file", False):
+        ret = asyncio.Future()
+        ret.set_result(None)
+        return ret # type: ignore
     cache = get_cache(fs, urlpath, size, cache_dir,
                       blocksize, parallel_timeout, cache_mapper)
 
@@ -203,12 +211,13 @@ def prefetch(urlpath: str, size: int, cache_dir: str, storage_options: dict[str,
             data = await f.read(block_size*2**4*5)  # type: ignore
             cache.fill(loc, data)
         cache._index[-1] = 2
-    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fsspec.asyn.get_loop())
+        await f.close() # type: ignore
+    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop) # type: ignore
 
 
 def _get_afetcher(urlpath: str, size: int, storage_options: dict[str, Any] | None = None, parallel_timeout=30, cache_dir: str | None = None, blocksize: int = 65536, cache_mapper: AbstractCacheMapper = PathCacheMapper()):
-    fs = get_filesystem(urlpath, storage_options=storage_options)
-    if cache_dir is None:
+    fs = get_async_filesystem(urlpath, storage_options=storage_options)
+    if cache_dir is None or getattr(fs, "local_file", False):
         return functools.partial(fs._cat_file, urlpath)
     else:
         cache = get_cache(fs, urlpath, size, cache_dir,
@@ -248,7 +257,7 @@ def get_s3fs_credentials(s3_credentials_yaml_file: str | os.PathLike | None) -> 
 
 
 def cache_locally_if_remote(urlpath: str, storage_options: dict[str, Any] | None = None, cache_dir: str | None = None, cache_mapper: AbstractCacheMapper = PathCacheMapper(), callback=TqdmCallback(tqdm_kwargs=dict(unit='b', unit_scale=True, dynamic_ncols=True))) -> str:
-    fs = get_filesystem(urlpath, storage_options=storage_options)
+    fs = get_async_filesystem(urlpath, storage_options=storage_options)
     if getattr(fs, "local_file", False):
         return urlpath
     if cache_dir is None:
@@ -259,13 +268,13 @@ def cache_locally_if_remote(urlpath: str, storage_options: dict[str, Any] | None
     lpath = os.path.join(
         cache_dir, cache_mapper(urlpath))
     if not os.path.exists(lpath):
-        fs.get_file(urlpath, lpath, callback=callback)
+        fs.get_file(urlpath, lpath, callback=callback) # type: ignore
     return lpath
 
 
 def get_as_locally_cached_filesystem_if_remote(urlpath: str, storage_options: dict[str, Any] | None = None, cache_dir: str | None = None, cache_mapper: AbstractCacheMapper = PathCacheMapper()):
-    fs = get_filesystem(urlpath, storage_options=storage_options)
-    if fs.local_file:
+    fs = get_async_filesystem(urlpath, storage_options=storage_options)
+    if getattr(fs, "local_file", False):
         return fs
     if cache_dir is None:
         raise ValueError(

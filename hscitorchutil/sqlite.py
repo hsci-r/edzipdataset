@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 from typing import Callable, Generic, Optional, Tuple, TypeVar, Sequence
@@ -79,8 +80,10 @@ def _remove_nones_from_batch(batch):
     if batch:
         try:
             return torch.utils.data.dataloader.default_collate(batch)
-        except TypeError:
+        except Exception as e:
+            logging.exception("Failed to collate batch, returning None")
             return None
+    logging.warn("Batch is empty, returning None")
     return None
 
 
