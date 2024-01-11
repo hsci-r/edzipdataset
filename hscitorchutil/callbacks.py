@@ -22,8 +22,8 @@ class CUDAMemorySnapshotCallback(Callback):
                 version = version if isinstance(
                     version, str) else f"version_{version}"
                 self.save_path = os.path.join(
-                    save_dir, str(name), version, "memory_snapshot.pt")
+                    save_dir, str(name), version, f"memory_snapshot_rank_{trainer.global_rank}.pt")
             else:
                 self.save_path = os.path.join(
-                    trainer.default_root_dir, "memory_snapshot.pt")
+                    trainer.default_root_dir, f"memory_snapshot_rank_{trainer.global_rank}.pt")
         torch.cuda.memory._dump_snapshot(self.save_path)
