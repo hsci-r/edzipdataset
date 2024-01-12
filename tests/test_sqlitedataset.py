@@ -3,6 +3,8 @@ import sqlite3
 
 import pytest
 
+from hscitorchutil.sqlite import combine_datasets
+
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
@@ -36,7 +38,7 @@ def test_sqlitedataset(dbname: str):
 def test_sqlitedatamodule(dbname: str, tmp_path):
     from hscitorchutil.sqlite import SQLiteDataModule
     db = SQLiteDataModule(dbname, dbname, dbname, str(
-        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2)
+        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2, get_predict_dataset=combine_datasets)
     db.prepare_data()
     db.setup()
     assert len(db.train_dataloader()) == 2

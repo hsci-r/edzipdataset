@@ -88,6 +88,14 @@ def _remove_nones_from_batch(batch):
     return None
 
 
+def get_test_dataset(train_dataset: Dataset[T_co], val_dataset: Dataset[T_co], test_dataset: Dataset[T_co]) -> Dataset[T_co]:
+    return test_dataset
+
+
+def combine_datasets(train_dataset: Dataset[T_co], val_dataset: Dataset[T_co], test_dataset: Dataset[T_co]) -> Dataset[T_co]:
+    return UnionMapDataset([train_dataset, val_dataset, test_dataset])
+
+
 class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co]):
     def __init__(self,
                  train_sqlite_url: str,
@@ -107,7 +115,7 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                      Sequence[T_co]], Sequence[T2_co]] = _identity,
                  prepare_data_per_node: bool = True,
                  collate_fn: Optional[Callable] = _remove_nones_from_batch,
-                 predict_dataset: Optional[Dataset[T2_co]] = None):
+                 get_predict_dataset: Callable[[Dataset[T2_co], Dataset[T2_co], Dataset[T2_co]], Dataset[T2_co]] = get_test_dataset):
         self.train_sqlite_url = train_sqlite_url
         self.val_sqlite_url = val_sqlite_url
         self.test_sqlite_url = test_sqlite_url
@@ -130,7 +138,8 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
-        self.predict_dataset = predict_dataset
+        self.predict_dataset = None
+        self.get_predict_dataset = get_predict_dataset
         super().__init__()
 
     def prepare_data(self):
@@ -171,8 +180,8 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                 self.id_column,
                 self.test_transform)
         if (stage is None or stage == "predict") and self.predict_dataset is None:
-            self.predict_dataset = UnionMapDataset(
-                [self.train_dataset, self.val_dataset, self.test_dataset])  # type: ignore
+            self.predict_dataset = self.get_predict_dataset(
+                self.train_dataset, self.val_dataset, self.test_dataset)  # type: ignore
 
     def train_dataloader(self) -> DataLoader[T2_co]:
         return DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0,  # type: ignore
