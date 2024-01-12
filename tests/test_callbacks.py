@@ -16,7 +16,7 @@ def test_predictionwritercallback(tmp_path: os.PathLike):
     trainer = Trainer(
         max_epochs=1,
         callbacks=[PredictionWriterCallback(save_path=str(
-            tmp_path), batch_transform=lambda x: x[:, 0])]
+            tmp_path), transform_batch=lambda x: x[:, 0])]
     )
     trainer.predict(model, dm)
     assert os.path.exists(os.path.join(tmp_path, "outputs_0_0.pt"))

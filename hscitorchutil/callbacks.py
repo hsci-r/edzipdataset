@@ -43,17 +43,18 @@ def identity_transform(x: T) -> T:
 
 
 class PredictionWriterCallback(BasePredictionWriter, Generic[T, T2]):
-    def __init__(self, write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch", save_path: str | None = None, batch_transform: Callable[[T], T] = identity_transform, output_transform: Callable[[T2], T2] = identity_transform) -> None:
+    def __init__(self, write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch", save_path: str | None = None, transform_batch: Callable[[T], T] = identity_transform, transform_outputs: Callable[[T2], T2] = identity_transform) -> None:
         super().__init__(write_interval=write_interval)
         self.save_path = save_path
-        self.batch_transform = batch_transform
-        self.output_transform = output_transform
+        self.transform_batch = transform_batch
+        self.transform_outputs = transform_outputs
 
     def setup(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage: str) -> None:
         super().setup(trainer, pl_module, stage)
         if self.save_path is None:
             self.save_path = os.path.join(_get_save_path(
-                trainer), f"memory_snapshot_rank_{trainer.global_rank}.pt")
+                trainer), f"outputs_rank_{trainer.global_rank}")
+            os.makedirs(self.save_path, exist_ok=True)
 
     def write_on_batch_end(self, trainer: pl.Trainer,
                            pl_module: pl.LightningModule,
@@ -62,7 +63,7 @@ class PredictionWriterCallback(BasePredictionWriter, Generic[T, T2]):
                            batch: T,
                            batch_idx: int,
                            dataloader_idx: int,) -> None:
-        torch.save(self.output_transform(prediction), os.path.join(self.save_path,  # type: ignore
+        torch.save(self.transform_outputs(prediction), os.path.join(self.save_path,  # type: ignore
                    f"outputs_{dataloader_idx}_{batch_idx}.pt"))
-        torch.save(self.batch_transform(batch), os.path.join(self.save_path,  # type: ignore
+        torch.save(self.transform_batch(batch), os.path.join(self.save_path,  # type: ignore
                    f"batch_{dataloader_idx}_{batch_idx}.pt"))
