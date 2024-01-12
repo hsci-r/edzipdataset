@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch
 import lightning.pytorch
 from edzip.sqlite import create_sqlite_directory_from_zip
+from hscitorchutil.dataset import UnionMapDataset
 from hscitorchutil.fsspec import get_s3fs_credentials, cache_locally_if_remote
 
 T_co = TypeVar('T_co', covariant=True)
@@ -93,17 +94,20 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
                  val_sqlite_url: str,
                  test_sqlite_url: str,
                  cache_dir: str,
-                 table_name: str, 
+                 table_name: str,
                  index_column: str,
                  columns_to_return: str,
                  id_column: str | None = None,
                  storage_options: dict = dict(),
                  batch_size: int = 64,
                  num_workers: int = 0,
-                 train_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = _identity,
-                 test_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = _identity,
+                 train_transform: Callable[[
+                     Sequence[T_co]], Sequence[T2_co]] = _identity,
+                 test_transform: Callable[[
+                     Sequence[T_co]], Sequence[T2_co]] = _identity,
                  prepare_data_per_node: bool = True,
-                 collate_fn: Optional[Callable] = _remove_nones_from_batch):
+                 collate_fn: Optional[Callable] = _remove_nones_from_batch,
+                 predict_dataset: Optional[Dataset[T2_co]] = None):
         self.train_sqlite_url = train_sqlite_url
         self.val_sqlite_url = val_sqlite_url
         self.test_sqlite_url = test_sqlite_url
@@ -117,13 +121,16 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
         self.columns_to_return = columns_to_return
         self.id_column = id_column
 
-        self.train_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = train_transform
-        self.test_transform: Callable[[Sequence[T_co]], Sequence[T2_co]] = test_transform
+        self.train_transform: Callable[[
+            Sequence[T_co]], Sequence[T2_co]] = train_transform
+        self.test_transform: Callable[[
+            Sequence[T_co]], Sequence[T2_co]] = test_transform
         self.prepare_data_per_node = prepare_data_per_node
         self.collate_fn = collate_fn
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
+        self.predict_dataset = predict_dataset
         super().__init__()
 
     def prepare_data(self):
@@ -139,30 +146,33 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
             self.test_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir)
 
     def setup(self, stage: Optional[str] = None):
-        if (stage is None or stage == "fit") and self.train_dataset is None:
+        if (stage is None or stage == "fit" or (self.predict_dataset is None and stage == "predict")) and self.train_dataset is None:
             self.train_dataset = SQLiteDataset(cache_locally_if_remote(
                 self.train_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
-                self.table_name, 
+                self.table_name,
                 self.index_column,
                 self.columns_to_return,
                 self.id_column,
                 self.train_transform)
-        if (stage is None or stage == "fit" or stage == "validate") and self.val_dataset is None:
+        if (stage is None or stage == "fit" or stage == "validate" or (self.predict_dataset is None and stage == "predict")) and self.val_dataset is None:
             self.val_dataset = SQLiteDataset(cache_locally_if_remote(
                 self.val_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
-                self.table_name, 
+                self.table_name,
                 self.index_column,
                 self.columns_to_return,
                 self.id_column,
                 self.test_transform)
-        if (stage is None or stage == "test") and self.test_dataset is None:
+        if (stage is None or stage == "test" or (self.predict_dataset is None and stage == "predict")) and self.test_dataset is None:
             self.test_dataset = SQLiteDataset(cache_locally_if_remote(
                 self.test_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
-                self.table_name, 
+                self.table_name,
                 self.index_column,
                 self.columns_to_return,
                 self.id_column,
                 self.test_transform)
+        if (stage is None or stage == "predict") and self.predict_dataset is None:
+            self.predict_dataset = UnionMapDataset(
+                [self.train_dataset, self.val_dataset, self.test_dataset])  # type: ignore
 
     def train_dataloader(self) -> DataLoader[T2_co]:
         return DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0,  # type: ignore
@@ -175,6 +185,10 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_c
     def test_dataloader(self) -> DataLoader[T2_co] | None:
         if self.test_dataset is not None:
             return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True)
+
+    def predict_dataloader(self) -> DataLoader[T2_co] | None:
+        if self.predict_dataset is not None:
+            return DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True)
 
     def teardown(self, stage: str):
         # clean up state after the trainer stops, delete files...
