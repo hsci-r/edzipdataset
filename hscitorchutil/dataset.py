@@ -1,14 +1,15 @@
 import bisect
 import random
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import Any, Callable, Optional, Sequence, TypeVar, Generic
 import torch
 from torch.utils.data import Dataset
+import torch.utils.data
 import logging
 
 T_co = TypeVar('T_co', covariant=True)
 
 
-class LinearMapSubset(Dataset[T_co]):
+class LinearMapSubset(Dataset[T_co], Generic[T_co]):
     r"""
     Slice a map dataset at specified indices.
 
@@ -46,7 +47,7 @@ class LinearMapSubset(Dataset[T_co]):
 T2_co = TypeVar('T2_co', covariant=True)
 
 
-class TransformedMapDataset(Dataset[T2_co]):
+class TransformedMapDataset(Dataset[T2_co], Generic[T2_co, T_co]):
     r"""Create a transformed map dataset by applying a transform function to all samples.
 
     Args:
@@ -73,7 +74,7 @@ class TransformedMapDataset(Dataset[T2_co]):
         return len(self.dataset)  # type: ignore
 
 
-class ShuffledMapDataset(Dataset[T_co]):
+class ShuffledMapDataset(Dataset[T_co], Generic[T_co]):
     r"""
     Shuffle the input map dataset via its indices.
 
@@ -137,7 +138,7 @@ def _log_exception(ds: 'ExceptionHandlingMapDataset', idx: int, e: Exception) ->
         f"ExceptionHandlingMapDataset encountered exception at index {idx}. Returning None.")
 
 
-class ExceptionHandlingMapDataset(Dataset[T_co]):
+class ExceptionHandlingMapDataset(Dataset[T_co], Generic[T_co]):
     r"""A dataset wrapper that catches exceptions and instead of bailing out, returns None.
 
     Args:
@@ -170,18 +171,18 @@ class ExceptionHandlingMapDataset(Dataset[T_co]):
         return len(self.dataset)  # type: ignore
 
 
-class DatasetToIterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, dataset: torch.utils.data.Dataset):
+class DatasetToIterableDataset(torch.utils.data.IterableDataset[T_co], Generic[T_co]):
+    def __init__(self, dataset: torch.utils.data.Dataset[T_co]):
         self.dataset = dataset
 
     def __iter__(self):
         if hasattr(self.dataset, "__iter__"):
-            return self.dataset.__iter__()
-        for i in range(len(self.dataset)):
+            return self.dataset.__iter__()  # type: ignore
+        for i in range(len(self.dataset)):  # type: ignore
             yield self.dataset[i]
 
 
-class UnionMapDataset(Dataset[T_co]):
+class UnionMapDataset(Dataset[T_co], Generic[T_co]):
     def __init__(self, datasets: Sequence[Dataset[T_co]]) -> None:
         self.datasets = datasets
         self.supports_getitems = True
