@@ -53,7 +53,6 @@ class SQLiteDataset(Dataset[T_co], Generic[*Ts, T_co]):
             self.index_column,
             self.columns_to_return,
             self.id_column,
-            self.transform,
             self._len
         ) = state
         self.sqlite = sqlite3.connect(self.sqlite_filename)
@@ -65,22 +64,21 @@ class SQLiteDataset(Dataset[T_co], Generic[*Ts, T_co]):
             self.index_column,
             self.columns_to_return,
             self.id_column,
-            self.transform,
             self._len
         )
 
 
-def _remove_nones_from_batch(batch):
+def _remove_nones_from_batch(batch: Sequence) -> Sequence:
     """Removes None values from batch. Used to recover from errors."""
     batch = list(filter(lambda x: x is not None, batch))
     if batch:
         try:
             return torch.utils.data.dataloader.default_collate(batch)
         except Exception as e:
-            logging.exception("Failed to collate batch, returning None")
-            return None
-    logging.warn("Batch is empty, returning None")
-    return None
+            logging.exception("Failed to collate batch, returning empty batch")
+            return ()
+    logging.warn("Batch is empty")
+    return ()
 
 
 class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
