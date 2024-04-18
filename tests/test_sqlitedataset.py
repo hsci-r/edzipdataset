@@ -1,9 +1,12 @@
 from pathlib import Path
 import sqlite3
+from typing import Sequence, cast
 
 import pytest
+from torch import Tensor
+from torch.utils.data import Dataset
 
-from hscitorchutil.sqlite import combine_datasets
+from hscitorchutil.sqlite import _remove_nones_from_batch
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -23,7 +26,8 @@ def dbname(tmp_path_factory) -> str:
 
 def test_sqlitedataset(dbname: str):
     from hscitorchutil.sqlite import SQLiteDataset
-    db = SQLiteDataset(dbname, "test", "entry_number", "value, id", "id")
+    db: SQLiteDataset[int, str, tuple[int, str]] = SQLiteDataset(
+        dbname, "test", "entry_number", "value, id", "id")
     assert len(db) == 3
     assert db[0] == (100, 'foo')
     assert db[1] == (200, 'bar')
@@ -35,16 +39,26 @@ def test_sqlitedataset(dbname: str):
     assert db.__getitems__(['foo', 'bar']) == [(100, 'foo'), (200, 'bar')]
 
 
+def my_collate(batch) -> tuple[Tensor, tuple[str]]:
+    return cast(tuple[Tensor, tuple[str]], _remove_nones_from_batch(batch))
+
+
 def test_sqlitedatamodule(dbname: str, tmp_path):
     from hscitorchutil.sqlite import SQLiteDataModule
     db = SQLiteDataModule(dbname, dbname, dbname, str(
-        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2, get_predict_dataset=combine_datasets)
+        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2, collate_fn=my_collate)
     db.prepare_data()
     db.setup()
-    assert len(db.train_dataloader()) == 2
-    vals, ids = db.train_dataloader().__iter__().__next__()
+    assert len(db.test_dataloader()) == 2
+    i = db.test_dataloader().__iter__()
+    vals, ids = i.__next__()
     assert len(vals) == 2
     assert len(ids) == 2
+    assert vals[0] == 100
+    assert vals[1] == 200
+    vals, ids = i.__next__()
+    assert len(vals) == 1
+    assert len(ids) == 1
+    assert vals[0] == 300
     assert len(db.val_dataloader()) == 2  # type: ignore
     assert len(db.test_dataloader()) == 2  # type: ignore
-    assert len(db.predict_dataloader()) == 5  # type: ignore
