@@ -44,10 +44,16 @@ class LinearMapSubset(Dataset[T_co], Generic[T_co]):
         return self.end - self.start
 
 
+K_co = TypeVar('K_co', covariant=True)
+K2_co = TypeVar('K2_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
 
 
-class TransformedMapDataset(Dataset[T2_co], Generic[T2_co, T_co]):
+def identity(i: T_co) -> T_co:
+    return i
+
+
+class TransformedMapDataset(Dataset[T2_co], Generic[K_co, K2_co, T_co, T2_co]):
     r"""Create a transformed map dataset by applying a transform function to all samples.
 
     Args:
@@ -55,20 +61,21 @@ class TransformedMapDataset(Dataset[T2_co], Generic[T2_co, T_co]):
         transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
     """
 
-    def __init__(self, dataset: Dataset[T_co], transform: Callable[[Sequence[T_co]], Sequence[T2_co]]) -> None:
+    def __init__(self, dataset: Dataset[T_co], item_transform: Callable[[Sequence[T_co]], Sequence[T2_co]], key_transform: Callable[[Sequence[K_co]], Sequence[K2_co]] = identity) -> None:
         self.dataset = dataset
-        self.transform = transform
+        self.key_transform = key_transform
+        self.item_transform = item_transform
 
     def __getitem__(self, idx):
-        return self.transform([self.dataset[idx]])[0]
+        return self.item_transform([self.dataset[self.key_transform([idx])[0]]])[0]
 
-    def __getitems__(self, indices: Sequence[int]) -> Sequence[T2_co]:
+    def __getitems__(self, indices: Sequence[K_co]) -> Sequence[T2_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
-            return self.transform(self.dataset.__getitems__(indices))  # type: ignore[attr-defined] # noqa
+            return self.item_transform(self.dataset.__getitems__(self.key_transform(indices)))  # type: ignore[attr-defined] # noqa
         else:
-            return self.transform([self.dataset[idx] for idx in indices])
+            return self.item_transform([self.dataset[idx] for idx in self.key_transform(indices)])
 
     def __len__(self):
         return len(self.dataset)  # type: ignore
