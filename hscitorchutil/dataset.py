@@ -61,10 +61,12 @@ class TransformedMapDataset(Dataset[T2_co], Generic[K_co, K2_co, T_co, T2_co]):
         transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
     """
 
-    def __init__(self, dataset: Dataset[T_co], item_transform: Callable[[Sequence[T_co]], Sequence[T2_co]], key_transform: Callable[[Sequence[K_co]], Sequence[K2_co]] = identity) -> None:
+    def __init__(self, dataset: Dataset[T_co], item_transform: Callable[[Sequence[T_co]], Sequence[T2_co]], key_transform: Callable[[Sequence[K_co]], Sequence[K2_co]] = identity, size: int | None = None) -> None:
         self.dataset = dataset
         self.key_transform = key_transform
         self.item_transform = item_transform
+        self.size = size if size is not None else len(
+            self.dataset)  # type: ignore
 
     def __getitem__(self, idx):
         return self.item_transform([self.dataset[self.key_transform([idx])[0]]])[0]
@@ -78,7 +80,7 @@ class TransformedMapDataset(Dataset[T2_co], Generic[K_co, K2_co, T_co, T2_co]):
             return self.item_transform([self.dataset[idx] for idx in self.key_transform(indices)])
 
     def __len__(self):
-        return len(self.dataset)  # type: ignore
+        return self.size
 
 
 class ShuffledMapDataset(Dataset[T_co], Generic[T_co]):
