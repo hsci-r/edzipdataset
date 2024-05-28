@@ -1,3 +1,7 @@
+from fsspec.asyn import AsyncFileSystem
+from hscitorchutil.processlocal import ProcessLocal
+import yaml
+import multiprocessing_utils
 import asyncio
 from concurrent import futures
 import datetime
@@ -9,16 +13,24 @@ from typing import Any, Awaitable, Callable, Iterable, Tuple, Coroutine
 import fsspec
 import fsspec.implementations.local
 import fsspec.asyn
-from fsspec.asyn import AsyncFileSystem
 from fsspec.callbacks import TqdmCallback
 from fsspec.implementations.cached import SimpleCacheFileSystem
 from fsspec.implementations.cache_mapper import AbstractCacheMapper
 from fsspec.caching import Fetcher, MMapCache, register_cache, caches
-from morefs.asyn_local import AsyncLocalFileSystem
-import multiprocessing_utils
-import yaml
+import fsspec.implementations.local
 
-from hscitorchutil.processlocal import ProcessLocal
+# The below patches LocalFileSystem to have the removed mv_file method that current AsyncLocalFileSystem version needs
+
+
+class PatchedLocalFileSystem(fsspec.implementations.local.LocalFileSystem):
+    def mv_file(self, src: str, dst: str, **kwargs) -> None:
+        self.mv(src, dst, **kwargs)
+
+
+fsspec.implementations.local.LocalFileSystem = PatchedLocalFileSystem
+
+from morefs.asyn_local import AsyncLocalFileSystem  # noqa
+
 
 # without this, fsspec hangs in a multiprocessing fork context when it has been already used in the parent process
 os.register_at_fork(
@@ -136,7 +148,7 @@ class SharedMMapCache(MMapCache):
         need = self._get_need(start, end)
         while need:
             to_fetch, waiting = self._get_to_fetch(need)
-            datas = await asyncio.gather(*[self.afetcher(sstart, send) for sstart, send, _ in to_fetch]) # type: ignore # noqa
+            datas = await asyncio.gather(*[self.afetcher(sstart, send) for sstart, send, _ in to_fetch])  # type: ignore # noqa
             for (sstart, send, cis), data in zip(to_fetch, datas):
                 self.cache[sstart:send] = data
                 for i in cis:
@@ -176,11 +188,13 @@ def get_async_filesystem(urlpath: str, storage_options: dict[str, Any] | None = 
         raise ValueError("Unsupported non-async filesystem: %s" % fs)
     return fs
 
+
 def get_cache(fs: AsyncFileSystem, urlpath: str, size: int, cache_dir: str, blocksize: int, parallel_timeout: int, cache_mapper: AbstractCacheMapper) -> SharedMMapCache:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir, exist_ok=True)
+
     def _cat_file_fetcher(fs: AsyncFileSystem, urlpath: str, start: int, end: int) -> bytes:
-        return fs.cat_file(urlpath, start=start, end=end) # type: ignore
+        return fs.cat_file(urlpath, start=start, end=end)  # type: ignore
 
     async def _cat_file_afetcher(_, urlpath: str, start: int, end: int) -> bytes:
         return await fs._cat_file(urlpath, start=start, end=end)
@@ -200,7 +214,7 @@ def prefetch_if_remote(urlpath: str, size: int, cache_dir: str, storage_options:
     if getattr(fs, "local_file", False):
         ret = asyncio.Future()
         ret.set_result(None)
-        return ret # type: ignore
+        return ret  # type: ignore
     cache = get_cache(fs, urlpath, size, cache_dir,
                       blocksize, parallel_timeout, cache_mapper)
 
@@ -211,8 +225,9 @@ def prefetch_if_remote(urlpath: str, size: int, cache_dir: str, storage_options:
             data = await f.read(block_size*2**4*5)  # type: ignore
             cache.fill(loc, data)
         cache._index[-1] = 2
-        await f.close() # type: ignore
-    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop) # type: ignore
+        await f.close()  # type: ignore
+    # type: ignore
+    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop)
 
 
 def _get_afetcher(urlpath: str, size: int, storage_options: dict[str, Any] | None = None, parallel_timeout=30, cache_dir: str | None = None, blocksize: int = 65536, cache_mapper: AbstractCacheMapper = PathCacheMapper()):
@@ -268,7 +283,7 @@ def cache_locally_if_remote(urlpath: str, storage_options: dict[str, Any] | None
     lpath = os.path.join(
         cache_dir, cache_mapper(urlpath))
     if not os.path.exists(lpath):
-        fs.get_file(urlpath, lpath, callback=callback) # type: ignore
+        fs.get_file(urlpath, lpath, callback=callback)  # type: ignore
     return lpath
 
 
