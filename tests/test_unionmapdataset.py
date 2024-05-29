@@ -2,14 +2,14 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from hscitorchutil.dataset import UnionMapDataset, TransformedMapDataset
+from hscitorchutil.dataset import UnionMapDataset, EntryTransformingMapDataset
 
 
 class TestUnionMapDataset(unittest.TestCase):
     def setUp(self):
         self.datasets = [TensorDataset(torch.arange(3)), TensorDataset(
             torch.arange(3, 6)), TensorDataset(torch.arange(6, 9))]
-        self.datasets2 = list(map(lambda d: TransformedMapDataset(
+        self.datasets2 = list(map(lambda d: EntryTransformingMapDataset(
             d, lambda x: x), self.datasets))  # TensorDataset doesn't support __getitems__
 
     def test_uniondataset(self):

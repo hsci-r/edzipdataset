@@ -53,7 +53,7 @@ def identity(i: T_co) -> T_co:
     return i
 
 
-class TransformedMapDataset(Dataset[T2_co], Generic[K_co, K2_co, T_co, T2_co]):
+class KeyTransformingMapDataset(Dataset[T_co], Generic[K_co, K2_co, T_co]):
     r"""Create a transformed map dataset by applying a transform function to all samples.
 
     Args:
@@ -61,26 +61,50 @@ class TransformedMapDataset(Dataset[T2_co], Generic[K_co, K2_co, T_co, T2_co]):
         transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
     """
 
-    def __init__(self, dataset: Dataset[T_co], item_transform: Callable[[Sequence[T_co]], Sequence[T2_co]], key_transform: Callable[[Sequence[K_co]], Sequence[K2_co]] = identity, size: int | None = None) -> None:
+    def __init__(self, dataset: Dataset[T_co], transform: Callable[[Sequence[K_co]], Sequence[K2_co]]) -> None:
         self.dataset = dataset
-        self.key_transform = key_transform
-        self.item_transform = item_transform
-        self.size = size if size is not None else len(
-            self.dataset)  # type: ignore
+        self.transform = transform
 
     def __getitem__(self, idx):
-        return self.item_transform([self.dataset[self.key_transform([idx])[0]]])[0]
+        return self.dataset[self.transform([idx])[0]]
+
+    def __getitems__(self, indices: Sequence[K_co]) -> Sequence[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__(self.transform(indices))  # type: ignore[attr-defined] # noqa
+        else:
+            return [self.dataset[idx] for idx in self.transform(indices)]
+
+    def __len__(self):
+        return len(self.dataset)  # type: ignore[attr-defined]
+
+
+class EntryTransformingMapDataset(Dataset[T2_co], Generic[T_co, T2_co]):
+    r"""Create a transformed map dataset by applying a transform function to all samples.
+
+    Args:
+        dataset (Dataset[T_co]): The underlying map dataset
+        transform (Callable[T:co,T2_co]): The transformation function to be applied to each sample
+    """
+
+    def __init__(self, dataset: Dataset[T_co], transform: Callable[[Sequence[T_co]], Sequence[T2_co]]) -> None:
+        self.dataset = dataset
+        self.transform = transform
+
+    def __getitem__(self, idx):
+        return self.transform([self.dataset[idx]])[0]
 
     def __getitems__(self, indices: Sequence[K_co]) -> Sequence[T2_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
-            return self.item_transform(self.dataset.__getitems__(self.key_transform(indices)))  # type: ignore[attr-defined] # noqa
+            return self.transform(self.dataset.__getitems__(indices))  # type: ignore[attr-defined] # noqa
         else:
-            return self.item_transform([self.dataset[idx] for idx in self.key_transform(indices)])
+            return self.transform([self.dataset[idx] for idx in indices])
 
     def __len__(self):
-        return self.size
+        return len(self.dataset)  # type: ignore[attr-defined]
 
 
 class ShuffledMapDataset(Dataset[T_co], Generic[T_co]):
@@ -232,5 +256,5 @@ class UnionMapDataset(Dataset[T_co], Generic[T_co]):
         return self._len
 
 
-__all__ = ["ExceptionHandlingMapDataset", "LinearMapSubset", "TransformedMapDataset",
+__all__ = ["ExceptionHandlingMapDataset", "LinearMapSubset", "KeyTransformingMapDataset", "EntryTransformingMapDataset",
            "ShuffledMapDataset", "UnionMapDataset", "DatasetToIterableDataset"]

@@ -3,7 +3,7 @@ import unittest
 
 import torch
 from torch.utils.data import TensorDataset
-from hscitorchutil.dataset import ExceptionHandlingMapDataset, TransformedMapDataset
+from hscitorchutil.dataset import ExceptionHandlingMapDataset, EntryTransformingMapDataset
 import pickle
 
 
@@ -16,7 +16,7 @@ def _except_on_two(tensors: Sequence[Tuple[torch.Tensor, ...]]) -> Sequence[Tupl
 
 class TestExceptionHandlingMapDataset(unittest.TestCase):
     def setUp(self):
-        self.dataset = TransformedMapDataset(
+        self.dataset = EntryTransformingMapDataset(
             TensorDataset(torch.arange(3)), _except_on_two)
 
     def test_exceptionhandlingdataset(self):
