@@ -1,12 +1,18 @@
+import abc
 import bisect
 import random
-from typing import Any, Callable, Optional, Sequence, TypeVar, Generic
+from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeVar, Generic, TypeVarTuple, cast
 import torch
-from torch.utils.data import Dataset
+import lightning.pytorch
+from torch.utils.data import Dataset, DataLoader
 import torch.utils.data
+import torch.utils.data.dataloader
 import logging
 
 T_co = TypeVar('T_co', covariant=True)
+T2_co = TypeVar('T2_co', covariant=True)
+T3_co = TypeVar('T3_co', covariant=True)
+Ts = TypeVarTuple("Ts")
 
 
 class LinearMapSubset(Dataset[T_co], Generic[T_co]):
@@ -49,7 +55,7 @@ K2_co = TypeVar('K2_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
 
 
-def identity(i: T_co) -> T_co:
+def identity_transformation(i: T_co) -> T_co:
     return i
 
 
@@ -256,5 +262,72 @@ class UnionMapDataset(Dataset[T_co], Generic[T_co]):
         return self._len
 
 
-__all__ = ["ExceptionHandlingMapDataset", "LinearMapSubset", "KeyTransformingMapDataset", "EntryTransformingMapDataset",
-           "ShuffledMapDataset", "UnionMapDataset", "DatasetToIterableDataset"]
+class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
+    pass
+
+
+def remove_nones_from_batch(batch: Sequence[T_co], collate_fn: Callable[[Any], Any] = torch.utils.data.dataloader.default_collate) -> Sequence[T2_co]:  # type: ignore
+    """Removes None values from batch. Used to recover from errors."""
+    batch = list(filter(lambda x: x is not None, batch))
+    if batch:
+        try:
+            return collate_fn(batch)
+        except Exception as e:
+            logging.exception("Failed to collate batch, returning empty batch")
+            return ()
+    logging.warn("Batch is empty")
+    return ()
+
+
+class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co], abc.ABC):
+    def __init__(self,
+                 batch_size: int = 64,
+                 num_workers: int = 0,
+                 prepare_data_per_node: bool = True,
+                 collate_fn: Optional[Callable[[Sequence[T_co]], T2_co]] = remove_nones_from_batch):
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.prepare_data_per_node = prepare_data_per_node
+        self.collate_fn = collate_fn
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+        self.predict_dataset = None
+        super().__init__()
+
+    def prepare_data(self):
+        # download, IO, etc. Useful with shared filesystems
+        # only called on 1 GPU/TPU in distributed
+        super().prepare_data()
+
+    def setup(self, stage: Literal['fit', 'validate', 'test', 'predict']):
+        # Called at the beginning of fit (train + validate), validate, test, or predict.
+        # This is a good hook when you need to build models dynamically or adjust something
+        # about them. This hook is called on every process when using DDP.
+        super().setup(stage)
+
+    def train_dataloader(self) -> TypedDataLoader[T2_co]:
+        if self.train_dataset is None:
+            raise ValueError("Training dataset not available")
+        return cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0,
+                                                       collate_fn=self.collate_fn, pin_memory=True))
+
+    def val_dataloader(self) -> TypedDataLoader[T2_co]:
+        if self.val_dataset is None:
+            raise ValueError("Validation dataset not available")
+        return cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+
+    def test_dataloader(self) -> TypedDataLoader[T2_co]:
+        if self.test_dataset is None:
+            raise ValueError("Test dataset not available")
+        return cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+
+    def predict_dataloader(self) -> TypedDataLoader[T2_co]:
+        if self.predict_dataset is None:
+            raise ValueError("Predict dataset not available")
+        return cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+
+    def teardown(self, stage: Literal['fit', 'validate', 'test', 'predict']):
+        # clean up state after the trainer stops, delete files...
+        # called on every process in DDP
+        super().teardown(stage)

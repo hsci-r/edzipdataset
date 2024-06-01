@@ -1,7 +1,7 @@
 import logging
 import os
 import sqlite3
-from typing import Callable, Generic, Iterable, Iterator, Optional, Tuple, TypeVar, Sequence, TypeVarTuple, cast
+from typing import Callable, Generic, Iterable, Iterator, Literal, Optional, Tuple, TypeVar, Sequence, TypeVarTuple, cast
 from zipfile import ZipFile
 import click
 import fsspec
@@ -10,15 +10,12 @@ from torch.utils.data import Dataset, DataLoader
 import torch
 import lightning.pytorch
 from edzip.sqlite import create_sqlite_directory_from_zip
+from hscitorchutil.dataset import ABaseDataModule, identity_transformation
 from hscitorchutil.fsspec import get_s3fs_credentials, cache_locally_if_remote
 
 Ts = TypeVarTuple("Ts")
 T_co = TypeVar('T_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
-
-
-def _identity(x: T_co) -> T_co:
-    return x
 
 
 class SQLiteDataset(Dataset[T_co], Generic[*Ts, T_co]):
@@ -68,24 +65,11 @@ class SQLiteDataset(Dataset[T_co], Generic[*Ts, T_co]):
         )
 
 
-def _remove_nones_from_batch(batch: Sequence) -> Sequence:
-    """Removes None values from batch. Used to recover from errors."""
-    batch = list(filter(lambda x: x is not None, batch))
-    if batch:
-        try:
-            return torch.utils.data.dataloader.default_collate(batch)
-        except Exception as e:
-            logging.exception("Failed to collate batch, returning empty batch")
-            return ()
-    logging.warn("Batch is empty")
-    return ()
-
-
 class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
     pass
 
 
-class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[*Ts, T_co, T2_co]):
+class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[*Ts, T_co, T2_co]):
     def __init__(self,
                  train_sqlite_url: str,
                  val_sqlite_url: str,
@@ -96,21 +80,17 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[*Ts, T_co,
                  columns_to_return: str,
                  id_column: str,
                  storage_options: dict = dict(),
-                 batch_size: int = 64,
-                 num_workers: int = 0,
                  train_transform: Callable[[
-                     Dataset[tuple[*Ts]]], Dataset[T_co]] = _identity,
+                     Dataset[tuple[*Ts]]], Dataset[T_co]] = identity_transformation,
                  test_transform: Callable[[
-                     Dataset[tuple[*Ts]]], Dataset[T_co]] = _identity,
-                 prepare_data_per_node: bool = True,
-                 collate_fn: Optional[Callable[[Sequence[T_co]], T2_co]] = _remove_nones_from_batch):
+                     Dataset[tuple[*Ts]]], Dataset[T_co]] = identity_transformation,
+                 **kwargs):
+        super().__init__(**kwargs)
         self.train_sqlite_url = train_sqlite_url
         self.val_sqlite_url = val_sqlite_url
         self.test_sqlite_url = test_sqlite_url
         self.cache_dir = cache_dir
         self.storage_options = storage_options
-        self.batch_size = batch_size
-        self.num_workers = num_workers
 
         self.table_name = table_name
         self.index_column = index_column
@@ -118,16 +98,11 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[*Ts, T_co,
         self.id_column = id_column
         self.train_transform = train_transform
         self.test_transform = test_transform
-        self.prepare_data_per_node = prepare_data_per_node
-        self.collate_fn = collate_fn
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
-        super().__init__()
 
     def prepare_data(self):
         # download, IO, etc. Useful with shared filesystems
         # only called on 1 GPU/TPU in distributed
+        super().prepare_data()
 
         # Ensure sqlite databases are downloaded
         cache_locally_if_remote(
@@ -137,22 +112,23 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[*Ts, T_co,
         cache_locally_if_remote(
             self.test_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir)
 
-    def setup(self, stage: Optional[str] = None):
-        if (stage is None or stage == "fit") and self.train_dataset is None:
+    def setup(self, stage: Literal['fit', 'validate', 'test', 'predict']):
+        super().setup(stage)
+        if (stage == "fit") and self.train_dataset is None:
             self.train_dataset = self.train_transform(SQLiteDataset(cache_locally_if_remote(
                 self.train_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
                 self.table_name,
                 self.index_column,
                 self.columns_to_return,
                 self.id_column))
-        if (stage is None or stage == "fit" or stage == "validate") and self.val_dataset is None:
+        if (stage == "fit" or stage == "validate") and self.val_dataset is None:
             self.val_dataset = self.test_transform(SQLiteDataset(cache_locally_if_remote(
                 self.val_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
                 self.table_name,
                 self.index_column,
                 self.columns_to_return,
                 self.id_column))
-        if (stage is None or stage == "test") and self.test_dataset is None:
+        if (stage == "test") and self.test_dataset is None:
             self.test_dataset = self.test_transform(SQLiteDataset(cache_locally_if_remote(
                 self.test_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),
                 self.table_name,
@@ -176,10 +152,10 @@ class SQLiteDataModule(lightning.pytorch.LightningDataModule, Generic[*Ts, T_co,
             raise ValueError("Test dataset not available")
         return cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
 
-    def teardown(self, stage: str):
+    def teardown(self, stage: Literal['fit', 'validate', 'test', 'predict']):
         # clean up state after the trainer stops, delete files...
         # called on every process in DDP
-        pass
+        super().teardown(stage)
 
 
 @click.command()

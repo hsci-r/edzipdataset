@@ -6,7 +6,7 @@ import pytest
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from hscitorchutil.sqlite import _remove_nones_from_batch
+from hscitorchutil.dataset import remove_nones_from_batch
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -40,7 +40,7 @@ def test_sqlitedataset(dbname: str):
 
 
 def my_collate(batch) -> tuple[Tensor, tuple[str]]:
-    return cast(tuple[Tensor, tuple[str]], _remove_nones_from_batch(batch))
+    return cast(tuple[Tensor, tuple[str]], remove_nones_from_batch(batch))
 
 
 def test_sqlitedatamodule(dbname: str, tmp_path):
@@ -48,7 +48,7 @@ def test_sqlitedatamodule(dbname: str, tmp_path):
     db = SQLiteDataModule(dbname, dbname, dbname, str(
         tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2, collate_fn=my_collate)
     db.prepare_data()
-    db.setup()
+    db.setup('test')
     assert len(db.test_dataloader()) == 2
     i = db.test_dataloader().__iter__()
     vals, ids = i.__next__()
@@ -60,5 +60,6 @@ def test_sqlitedatamodule(dbname: str, tmp_path):
     assert len(vals) == 1
     assert len(ids) == 1
     assert vals[0] == 300
+    db.setup("validate")
     assert len(db.val_dataloader()) == 2  # type: ignore
     assert len(db.test_dataloader()) == 2  # type: ignore

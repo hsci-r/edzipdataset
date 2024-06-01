@@ -5,6 +5,8 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import Callback, BasePredictionWriter
 import torch
 
+from hscitorchutil.dataset import identity_transformation
+
 
 def _get_save_path(trainer: Trainer) -> str:
     if len(trainer.loggers) > 0 and trainer.loggers[0].save_dir is not None:
@@ -38,12 +40,8 @@ T = TypeVar('T')
 T2 = TypeVar('T2')
 
 
-def identity_transform(x: T) -> T:
-    return x
-
-
 class PredictionWriterCallback(BasePredictionWriter, Generic[T, T2]):
-    def __init__(self, write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch", save_path: str | None = None, transform_batch: Callable[[T], T] = identity_transform, transform_outputs: Callable[[T2], T2] = identity_transform) -> None:
+    def __init__(self, write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch", save_path: str | None = None, transform_batch: Callable[[T], T] = identity_transformation, transform_outputs: Callable[[T2], T2] = identity_transformation) -> None:
         super().__init__(write_interval=write_interval)
         self.save_path = save_path
         self.transform_batch = transform_batch
