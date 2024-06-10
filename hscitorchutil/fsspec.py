@@ -189,23 +189,25 @@ def get_async_filesystem(urlpath: str, storage_options: dict[str, Any] | None = 
     return fs
 
 
+def cat_file_fetcher(fs: AsyncFileSystem, urlpath: str, start: int, end: int) -> bytes:
+    return fs.cat_file(urlpath, start=start, end=end)  # type: ignore
+
+
+async def cat_file_afetcher(fs: AsyncFileSystem, urlpath: str, start: int, end: int) -> bytes:
+    return await fs._cat_file(urlpath, start=start, end=end)
+
+
 def get_cache(fs: AsyncFileSystem, urlpath: str, size: int, cache_dir: str, blocksize: int, parallel_timeout: int, cache_mapper: AbstractCacheMapper) -> SharedMMapCache:
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir, exist_ok=True)
 
-    def _cat_file_fetcher(fs: AsyncFileSystem, urlpath: str, start: int, end: int) -> bytes:
-        return fs.cat_file(urlpath, start=start, end=end)  # type: ignore
-
-    async def _cat_file_afetcher(_, urlpath: str, start: int, end: int) -> bytes:
-        return await fs._cat_file(urlpath, start=start, end=end)
-
     return SharedMMapCache(
         blocksize,
-        functools.partial(_cat_file_fetcher, fs, urlpath),
+        functools.partial(cat_file_fetcher, fs, urlpath),
         size,
         os.path.join(cache_dir, cache_mapper(urlpath) + ".cache"),
         os.path.join(cache_dir, cache_mapper(urlpath) + ".cache-index"),
-        afetcher=functools.partial(_cat_file_afetcher, fs, urlpath),
+        afetcher=functools.partial(cat_file_afetcher, fs, urlpath),
         parallel_timeout=parallel_timeout)
 
 
@@ -226,14 +228,13 @@ def prefetch_if_remote(urlpath: str, size: int, cache_dir: str, storage_options:
             cache.fill(loc, data)
         cache._index[-1] = 2
         await f.close()  # type: ignore
-    # type: ignore
-    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop)
+    return asyncio.run_coroutine_threadsafe(_a_fill_cache(), fs.loop)  # type: ignore # noqa
 
 
 def _get_afetcher(urlpath: str, size: int, storage_options: dict[str, Any] | None = None, parallel_timeout=30, cache_dir: str | None = None, blocksize: int = 65536, cache_mapper: AbstractCacheMapper = PathCacheMapper()):
     fs = get_async_filesystem(urlpath, storage_options=storage_options)
     if cache_dir is None or getattr(fs, "local_file", False):
-        return functools.partial(fs._cat_file, urlpath)
+        return functools.partial(cat_file_afetcher, fs, urlpath)
     else:
         cache = get_cache(fs, urlpath, size, cache_dir,
                           blocksize, parallel_timeout, cache_mapper)
