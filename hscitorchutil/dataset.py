@@ -1,7 +1,7 @@
 import abc
 import bisect
 import random
-from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeVar, Generic, TypeVarTuple, cast
+from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeVar, Generic, cast
 import torch
 import lightning.pytorch
 from torch.utils.data import Dataset, DataLoader
@@ -12,7 +12,6 @@ import logging
 T_co = TypeVar('T_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
 T3_co = TypeVar('T3_co', covariant=True)
-Ts = TypeVarTuple("Ts")
 
 
 class LinearMapSubset(Dataset[T_co], Generic[T_co]):

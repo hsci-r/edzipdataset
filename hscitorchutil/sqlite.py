@@ -1,7 +1,8 @@
 import logging
 import os
 import sqlite3
-from typing import Callable, Generic, Iterable, Iterator, Literal, Optional, Tuple, TypeVar, Sequence, TypeVarTuple, cast
+from typing import Callable, Generic, Iterable, Iterator, Literal, Optional, Tuple, TypeVar, Sequence, cast
+from typing_extensions import TypeVarTuple, Unpack
 from zipfile import ZipFile
 import click
 import fsspec
@@ -18,7 +19,7 @@ T_co = TypeVar('T_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
 
 
-class SQLiteDataset(Dataset[T_co], Generic[*Ts, T_co]):
+class SQLiteDataset(Dataset[T_co], Generic[Unpack[Ts], T_co]):
     def __init__(self, sqlite_filename: str, table_name: str, index_column: str, columns_to_return: str, id_column: str):
         self.sqlite_filename = sqlite_filename
         self.table_name = table_name
@@ -69,7 +70,7 @@ class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
     pass
 
 
-class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[*Ts, T_co, T2_co]):
+class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[Unpack[Ts], T_co, T2_co]):
     def __init__(self,
                  train_sqlite_url: str,
                  val_sqlite_url: str,
@@ -81,9 +82,9 @@ class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[*Ts, T_co, T2_co]):
                  id_column: str,
                  storage_options: dict = dict(),
                  train_transform: Callable[[
-                     Dataset[tuple[*Ts]]], Dataset[T_co]] = identity_transformation,
+                     Dataset[tuple[Unpack[Ts]]]], Dataset[T_co]] = identity_transformation,
                  test_transform: Callable[[
-                     Dataset[tuple[*Ts]]], Dataset[T_co]] = identity_transformation,
+                     Dataset[tuple[Unpack[Ts]]]], Dataset[T_co]] = identity_transformation,
                  **kwargs):
         super().__init__(**kwargs)
         self.train_sqlite_url = train_sqlite_url
