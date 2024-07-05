@@ -6,6 +6,7 @@ from typing_extensions import TypeVarTuple, Unpack
 from zipfile import ZipFile
 import click
 import fsspec
+from contextlib import closing
 import torch.utils.data.dataloader
 from torch.utils.data import Dataset, DataLoader
 import torch
@@ -27,10 +28,13 @@ class SQLiteDataset(Dataset[T_co], Generic[Unpack[Ts], T_co]):
         self.id_column = id_column
         self.columns_to_return = columns_to_return
         self.sqlite = sqlite3.connect(sqlite_filename)
-        self._len = self.sqlite.execute(
-            f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        self._len = None
 
     def __len__(self):
+        if self._len is None:
+            with closing(self.sqlite.execute(
+                    f"SELECT COUNT(*) FROM {self.table_name}")) as cur:
+                self._len = cur.fetchall()[0][0]
         return self._len
 
     def __getitem__(self, idx: int | str) -> T_co:
