@@ -308,17 +308,6 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
         self._predict_dataloader = None
         super().__init__()
 
-    def prepare_data(self):
-        # download, IO, etc. Useful with shared filesystems
-        # only called on 1 GPU/TPU in distributed
-        super().prepare_data()
-
-    def setup(self, stage: Literal['fit', 'validate', 'test', 'predict']):
-        # Called at the beginning of fit (train + validate), validate, test, or predict.
-        # This is a good hook when you need to build models dynamically or adjust something
-        # about them. This hook is called on every process when using DDP.
-        super().setup(stage)
-
     def train_dataloader(self) -> TypedDataLoader[T2_co]:
         if self._train_dataloader is None:
             if self.train_dataset is None:
@@ -347,8 +336,3 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
                 raise ValueError("Predict dataset not available")
             self._predict_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers, persistent_workers=self.persistent_workers or self.num_predict_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
         return self._predict_dataloader
-
-    def teardown(self, stage: Literal['fit', 'validate', 'test', 'predict']):
-        # clean up state after the trainer stops, delete files...
-        # called on every process in DDP
-        super().teardown(stage)
