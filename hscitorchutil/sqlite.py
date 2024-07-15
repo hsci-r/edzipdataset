@@ -141,27 +141,6 @@ class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[Unpack[Ts], T_co, T
                 self.columns_to_return,
                 self.id_column))
 
-    def train_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.train_dataset is None:
-            raise ValueError("Training dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0,
-                                                       collate_fn=self.collate_fn, pin_memory=True))
-
-    def val_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.val_dataset is None:
-            raise ValueError("Validation dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
-
-    def test_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.test_dataset is None:
-            raise ValueError("Test dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
-
-    def teardown(self, stage: Literal['fit', 'validate', 'test', 'predict']):
-        # clean up state after the trainer stops, delete files...
-        # called on every process in DDP
-        super().teardown(stage)
-
 
 @click.command()
 @click.option("--key", required=False)

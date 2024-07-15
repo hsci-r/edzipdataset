@@ -281,17 +281,31 @@ def remove_nones_from_batch(batch: Sequence[T_co], collate_fn: Callable[[Any], A
 class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co], abc.ABC):
     def __init__(self,
                  batch_size: int = 64,
-                 num_workers: int = 0,
+                 num_train_workers: int = 0,
+                 num_val_workers: int = 0,
+                 num_test_workers: int = 0,
+                 num_predict_workers: int = 0,
                  prepare_data_per_node: bool = True,
+                 pin_memory: bool = True,
+                 persistent_workers: Optional[bool] = None,
                  collate_fn: Optional[Callable[[Sequence[T_co]], T2_co]] = remove_nones_from_batch):
         self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.num_train_workers = num_train_workers
+        self.num_val_workers = num_val_workers
+        self.num_test_workers = num_test_workers
+        self.num_predict_workers = num_predict_workers
         self.prepare_data_per_node = prepare_data_per_node
         self.collate_fn = collate_fn
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
-        self.predict_dataset = None
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.train_dataset: Optional[Dataset[T_co]] = None
+        self.val_dataset: Optional[Dataset[T_co]] = None
+        self.test_dataset: Optional[Dataset[T_co]] = None
+        self.predict_dataset: Optional[Dataset[T_co]] = None
+        self._train_dataloader = None
+        self._val_dataloader = None
+        self._test_dataloader = None
+        self._predict_dataloader = None
         super().__init__()
 
     def prepare_data(self):
@@ -306,25 +320,33 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
         super().setup(stage)
 
     def train_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.train_dataset is None:
-            raise ValueError("Training dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0,
-                                                       collate_fn=self.collate_fn, pin_memory=True))
+        if self._train_dataloader is None:
+            if self.train_dataset is None:
+                raise ValueError("Training dataset not available")
+            self._train_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_train_workers, persistent_workers=self.persistent_workers or self.num_train_workers > 0,
+                                                       collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+        return self._train_dataloader
 
     def val_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.val_dataset is None:
-            raise ValueError("Validation dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+        if self._val_dataloader is None:
+            if self.val_dataset is None:
+                raise ValueError("Validation dataset not available")
+            self._val_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_val_workers, persistent_workers=self.persistent_workers or self.num_val_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+        return self._val_dataloader
 
     def test_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.test_dataset is None:
-            raise ValueError("Test dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+        if self._test_dataloader is None:
+            if self.test_dataset is None:
+                raise ValueError("Test dataset not available")
+            self._test_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_test_workers, persistent_workers=self.persistent_workers or self.num_test_workers > 0 , collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+        return self._test_dataloader
 
     def predict_dataloader(self) -> TypedDataLoader[T2_co]:
-        if self.predict_dataset is None:
-            raise ValueError("Predict dataset not available")
-        return cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=self.num_workers > 0, collate_fn=self.collate_fn, pin_memory=True))
+        if self._predict_dataloader is None:
+            if self.predict_dataset is None:
+                raise ValueError("Predict dataset not available")
+            self._predict_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers, persistent_workers=self.persistent_workers or self.num_predict_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+        return self._predict_dataloader
 
     def teardown(self, stage: Literal['fit', 'validate', 'test', 'predict']):
         # clean up state after the trainer stops, delete files...
