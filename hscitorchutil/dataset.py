@@ -288,6 +288,7 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
                  prepare_data_per_node: bool = True,
                  pin_memory: bool = True,
                  persistent_workers: Optional[bool] = None,
+                 prefetch_factor: int = 2,
                  collate_fn: Optional[Callable[[Sequence[T_co]], T2_co]] = remove_nones_from_batch):
         self.batch_size = batch_size
         self.num_train_workers = num_train_workers
@@ -298,6 +299,7 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
         self.train_dataset: Optional[Dataset[T_co]] = None
         self.val_dataset: Optional[Dataset[T_co]] = None
         self.test_dataset: Optional[Dataset[T_co]] = None
@@ -312,27 +314,30 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
         if self._train_dataloader is None:
             if self.train_dataset is None:
                 raise ValueError("Training dataset not available")
-            self._train_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_train_workers, persistent_workers=self.persistent_workers or self.num_train_workers > 0,
-                                                       collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+            self._train_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_train_workers,
+                                          persistent_workers=self.persistent_workers or self.num_train_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_train_workers > 0 else None))
         return self._train_dataloader
 
     def val_dataloader(self) -> TypedDataLoader[T2_co]:
         if self._val_dataloader is None:
             if self.val_dataset is None:
                 raise ValueError("Validation dataset not available")
-            self._val_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_val_workers, persistent_workers=self.persistent_workers or self.num_val_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+            self._val_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_val_workers,
+                                        persistent_workers=self.persistent_workers or self.num_val_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_val_workers > 0 else None))
         return self._val_dataloader
 
     def test_dataloader(self) -> TypedDataLoader[T2_co]:
         if self._test_dataloader is None:
             if self.test_dataset is None:
                 raise ValueError("Test dataset not available")
-            self._test_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_test_workers, persistent_workers=self.persistent_workers or self.num_test_workers > 0 , collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+            self._test_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_test_workers,
+                                         persistent_workers=self.persistent_workers or self.num_test_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_test_workers > 0 else None))
         return self._test_dataloader
 
     def predict_dataloader(self) -> TypedDataLoader[T2_co]:
         if self._predict_dataloader is None:
             if self.predict_dataset is None:
                 raise ValueError("Predict dataset not available")
-            self._predict_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers, persistent_workers=self.persistent_workers or self.num_predict_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
+            self._predict_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers,
+                                            persistent_workers=self.persistent_workers or self.num_predict_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
         return self._predict_dataloader
