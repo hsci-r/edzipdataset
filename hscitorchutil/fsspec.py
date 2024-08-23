@@ -9,7 +9,7 @@ import functools
 import mmap
 import os
 import time
-from typing import Any, Awaitable, Callable, Iterable, Tuple, Coroutine
+from typing import Any, Awaitable, Callable, Iterable, Sequence, Tuple, Coroutine
 import fsspec
 import fsspec.implementations.local
 import fsspec.asyn
@@ -306,3 +306,12 @@ def fetch_async(afetcher: AFetcher, offsets_and_sizes: Iterable[Tuple[int, int]]
     ret = asyncio.run_coroutine_threadsafe(_fetch_async(
         afetcher, offsets_and_sizes), fsspec.asyn.get_loop()).result()
     return ret
+
+
+async def _multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
+    return await asyncio.gather(*[_fetch_async(afetcher, offsets_and_sizes) for afetcher, offsets_and_sizes in tasks])
+
+
+def multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
+    return asyncio.run_coroutine_threadsafe(_multi_fetch_async(tasks), fsspec.asyn.get_loop()).result()
+
