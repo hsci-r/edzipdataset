@@ -252,11 +252,11 @@ class PLocalAFetcher:
         self.cache_mapper = cache_mapper
         self.plocal = ProcessLocal()
 
-    def __call__(self, offset: int, size: int) -> Coroutine[Any, Any, bytes]:
+    def __call__(self, start_offset: int, end_offset: int) -> Coroutine[Any, Any, bytes]:
         if not hasattr(self.plocal, '_afetcher'):
             self.plocal._afetcher = _get_afetcher(
                 self.urlpath, self.size, self.storage_options, self.parallel_timeout, self.cache_dir, self.blocksize, self.cache_mapper)
-        return self.plocal._afetcher(offset, size)
+        return self.plocal._afetcher(start_offset, end_offset)
 
 
 def get_s3fs_credentials(s3_credentials_yaml_file: str | os.PathLike | None) -> dict[str, str | None]:
@@ -298,39 +298,39 @@ def get_as_locally_cached_filesystem_if_remote(urlpath: str, storage_options: di
     return SimpleCacheFileSystem(fs=fs, cache_storage=cache_dir, cache_mapper=cache_mapper)
 
 
-async def _fetch_async(afetcher: AFetcher, offsets_and_sizes: Iterable[Tuple[int, int]]) -> list[bytes]:
-    return await asyncio.gather(*[afetcher(offset, size) for offset, size in offsets_and_sizes])
+async def _fetch_async(afetcher: AFetcher, offsets: Iterable[Tuple[int, int]]) -> list[bytes]:
+    return await asyncio.gather(*[afetcher(start_offset, end_offset) for start_offset, end_offset in offsets])
 
 
-def fetch_async(afetcher: AFetcher, offsets_and_sizes: Iterable[Tuple[int, int]]) -> list[bytes]:
+def fetch_async(afetcher: AFetcher, offsets: Iterable[Tuple[int, int]]) -> list[bytes]:
     ret = asyncio.run_coroutine_threadsafe(_fetch_async(
-        afetcher, offsets_and_sizes), fsspec.asyn.get_loop()).result()
+        afetcher, offsets), fsspec.asyn.get_loop()).result()
     return ret
 
 
-async def _multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
+async def _multi_fetch_async(tasks: Iterable[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
     return await asyncio.gather(*[_fetch_async(afetcher, offsets_and_sizes) for afetcher, offsets_and_sizes in tasks])
 
 
-def multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
+def multi_fetch_async(tasks: Iterable[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
     return asyncio.run_coroutine_threadsafe(_multi_fetch_async(tasks), fsspec.asyn.get_loop()).result()
 
 
 T_co = TypeVar('T_co', covariant=True)
 
 
-async def _fetch_and_transform_async(afetcher: AFetcher, offset: int, size: int, transform: Callable[[bytes], T_co]) -> T_co:
-    data = await afetcher(offset, size)
+async def _fetch_and_transform_async(afetcher: AFetcher, start_offset: int, end_offset: int, transform: Callable[[bytes], T_co]) -> T_co:
+    data = await afetcher(start_offset, end_offset)
     return transform(data)
 
 
-async def _fetch_and_transform_multiple_async(afetcher: AFetcher, offsets_and_size: Iterable[Tuple[int, int]], transform: Callable[[bytes], T_co]) -> list[T_co]:
-    return await asyncio.gather(*[_fetch_and_transform_async(afetcher, offset, size, transform) for offset, size in offsets_and_size])
+async def _fetch_and_transform_multiple_async(afetcher: AFetcher, offsets: Iterable[Tuple[int, int]], transform: Callable[[bytes], T_co]) -> list[T_co]:
+    return await asyncio.gather(*[_fetch_and_transform_async(afetcher, start_offset, end_offset, transform) for start_offset, end_offset in offsets])
 
 
-async def _multi_fetch_and_transform_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
+async def _multi_fetch_and_transform_async(tasks: Iterable[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
     return await asyncio.gather(*[_fetch_and_transform_multiple_async(afetcher, offsets_and_sizes, transform) for afetcher, offsets_and_sizes, transform in tasks])
 
 
-def multi_fetch_and_transform_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
+def multi_fetch_and_transform_async(tasks: Iterable[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
     return asyncio.run_coroutine_threadsafe(_multi_fetch_and_transform_async(tasks), fsspec.asyn.get_loop()).result()
