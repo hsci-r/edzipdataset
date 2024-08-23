@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hscitorchutil"
-version = "0.2.8"
+version = "0.2.9"
 description = "HSCI research group utilities for pytorch (lightning)"
 authors = ["Eetu Mäkelä <eetu.makela@helsinki.fi>"]
 readme = "README.md"

@@ -2,7 +2,7 @@ from pathlib import Path
 import fsspec.asyn
 
 import asyncio
-from hscitorchutil.fsspec import get_async_filesystem, prefetch_if_remote, _get_afetcher, multi_fetch_async
+from hscitorchutil.fsspec import get_async_filesystem, prefetch_if_remote, _get_afetcher, multi_fetch_async, multi_fetch_and_transform_async
 from fsspec.asyn import AsyncFileSystem
 import concurrent.futures
 
@@ -51,3 +51,17 @@ def test_multi_fetch_async(tmp_path: Path):
         str(tmp_path / "test2.txt"), 500, cache_dir=str(tmp_path / "cache"))
     assert multi_fetch_async([(afetcher1, [(0, 5), (4, 9)]), (afetcher2, [
                              (0, 5), (4, 9)])]) == [[b"hello", b"ohell"], [b"world", b"dworl"]]
+
+
+def test_multi_fetch_and_transform_async(tmp_path: Path):
+    with open(tmp_path / "test1.txt", 'w') as f:
+        f.write("hello"*100)
+    with open(tmp_path / "test2.txt", 'w') as f:
+        f.write("world"*100)
+    afetcher1 = _get_afetcher(
+        str(tmp_path / "test1.txt"), 500, cache_dir=str(tmp_path / "cache"))
+    afetcher2 = _get_afetcher(
+        str(tmp_path / "test2.txt"), 500, cache_dir=str(tmp_path / "cache"))
+    transform = lambda x: x[::-1]
+    assert multi_fetch_and_transform_async([(afetcher1, [(0, 5), (4, 9)], transform), (afetcher2, [
+                             (0, 5), (4, 9)], transform)],) == [[b"olleh", b"lleho"], [b"dlrow", b"lrowd"]]

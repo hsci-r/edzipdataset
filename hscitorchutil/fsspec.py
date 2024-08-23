@@ -9,7 +9,7 @@ import functools
 import mmap
 import os
 import time
-from typing import Any, Awaitable, Callable, Iterable, Sequence, Tuple, Coroutine
+from typing import Any, Awaitable, Callable, Iterable, Sequence, Tuple, Coroutine, TypeVar
 import fsspec
 import fsspec.implementations.local
 import fsspec.asyn
@@ -315,3 +315,22 @@ async def _multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int,
 def multi_fetch_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]]]]) -> list[list[bytes]]:
     return asyncio.run_coroutine_threadsafe(_multi_fetch_async(tasks), fsspec.asyn.get_loop()).result()
 
+
+T_co = TypeVar('T_co', covariant=True)
+
+
+async def _fetch_and_transform_async(afetcher: AFetcher, offset: int, size: int, transform: Callable[[bytes], T_co]) -> T_co:
+    data = await afetcher(offset, size)
+    return transform(data)
+
+
+async def _fetch_and_transform_multiple_async(afetcher: AFetcher, offsets_and_size: Iterable[Tuple[int, int]], transform: Callable[[bytes], T_co]) -> list[T_co]:
+    return await asyncio.gather(*[_fetch_and_transform_async(afetcher, offset, size, transform) for offset, size in offsets_and_size])
+
+
+async def _multi_fetch_and_transform_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
+    return await asyncio.gather(*[_fetch_and_transform_multiple_async(afetcher, offsets_and_sizes, transform) for afetcher, offsets_and_sizes, transform in tasks])
+
+
+def multi_fetch_and_transform_async(tasks: Sequence[Tuple[AFetcher, Iterable[Tuple[int, int]], Callable[[bytes], T_co]]]) -> list[list[T_co]]:
+    return asyncio.run_coroutine_threadsafe(_multi_fetch_and_transform_async(tasks), fsspec.asyn.get_loop()).result()
