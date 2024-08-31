@@ -47,9 +47,34 @@ class LinearMapSubset(Dataset[T_co], Generic[T_co]):
 
     def __len__(self):
         return self.end - self.start
-
-
+    
 K_co = TypeVar('K_co', covariant=True)
+
+class IdBasedMapSubset(Dataset[T_co], Generic[K_co, T_co]):
+    """A dataset implementation enabling the subsetting of another dataset based on given ids"""
+
+    def __init__(self,
+                 dataset: Dataset[T_co],
+                 ids: Sequence[K_co],
+                 ):
+        self.dataset = dataset
+        self.ids = ids
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def __getitem__(self, idx: int) -> T_co:
+        return self.dataset[self.ids[idx]]
+
+    def __getitems__(self, idxs: Sequence[int]) -> Sequence[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__([self.ids[idx] for idx in idxs])  # type: ignore[attr-defined] # noqa
+        else:
+            return [self.dataset[self.ids[idx]] for idx in idxs]
+        
+
 K2_co = TypeVar('K2_co', covariant=True)
 T2_co = TypeVar('T2_co', covariant=True)
 
