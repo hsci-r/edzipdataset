@@ -1,19 +1,15 @@
-import logging
 import os
 import sqlite3
-from typing import Callable, Generic, Iterable, Iterator, Literal, Optional, Tuple, TypeVar, Sequence, cast
+from typing import Callable, Generic, Iterable, Literal, Optional, TypeVar, Sequence
 from typing_extensions import TypeVarTuple, Unpack
 from zipfile import ZipFile
 import click
 import fsspec
 from contextlib import closing
-import torch.utils.data.dataloader
 from torch.utils.data import Dataset, DataLoader
-import torch
-import lightning.pytorch
 from edzip.sqlite import create_sqlite_directory_from_zip
 from hscitorchutil.dataset import ABaseDataModule, identity_transformation
-from hscitorchutil.fsspec import get_s3fs_credentials, cache_locally_if_remote
+from hscifsspecutil import get_s3fs_credentials, cache_locally_if_remote
 
 Ts = TypeVarTuple("Ts")
 T_co = TypeVar('T_co', covariant=True)

@@ -17,7 +17,7 @@ class ProcessLocal(object):
 
     def __getattr__(self, item):
         if item == '_local':
-            return super(ProcessLocal, self).__getattr__(item)
+            return super(ProcessLocal, self).__getattr__(item) # type: ignore
         self._thread_init()
         return getattr(self._local, item)
 
