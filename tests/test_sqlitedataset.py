@@ -1,3 +1,4 @@
+import itertools
 from pathlib import Path
 import sqlite3
 from typing import Sequence, cast
@@ -21,6 +22,17 @@ def dbname(tmp_path_factory) -> str:
         con.execute("INSERT INTO test VALUES (0, 'foo', 100)")
         con.execute("INSERT INTO test VALUES (1, 'bar', 200)")
         con.execute("INSERT INTO test VALUES (2, 'barfoo', 300)")
+    return db_path
+
+@pytest.fixture(scope="session")
+def largedbname(tmp_path_factory) -> str:
+    db_path = str(tmp_path_factory.mktemp("data") / "test.db")
+    con = sqlite3.connect(db_path)
+    with con:
+        con.execute(
+            "CREATE TABLE test (entry_number INTEGER PRIMARY KEY, id VARCHAR(255), value INTEGER)")
+        for i in range(100):
+            con.execute(f"INSERT INTO test VALUES ({i}, 'foo_{i}', {i*100})")
     return db_path
 
 
@@ -63,3 +75,61 @@ def test_sqlitedatamodule(dbname: str, tmp_path):
     db.setup("validate")
     assert len(db.val_dataloader()) == 2  # type: ignore
     assert len(db.test_dataloader()) == 2  # type: ignore
+
+def test_dataloader_state(dbname: str, tmp_path):
+    from hscitorchutil.sqlite import SQLiteDataModule
+    db = SQLiteDataModule(dbname, dbname, dbname, str(
+        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=2, collate_fn=my_collate)
+    db.prepare_data()
+    db.setup('test')
+    assert len(db.test_dataloader()) == 2
+    dl = db.test_dataloader()
+    i = dl.__iter__()
+    vals, ids = i.__next__()
+    assert len(vals) == 2
+    assert len(ids) == 2
+    assert vals[0] == 100
+    assert vals[1] == 200
+    state = dl.state_dict()
+    vals, ids = i.__next__()
+    assert len(vals) == 1
+    assert len(ids) == 1
+    assert vals[0] == 300
+    dl.load_state_dict(state)
+    i = dl.__iter__()
+    vals, ids = i.__next__()
+    assert len(vals) == 1
+    assert len(ids) == 1
+    assert vals[0] == 300
+
+
+def test_dataloader_state_with_workers(largedbname: str, tmp_path):
+    from hscitorchutil.sqlite import SQLiteDataModule
+    db = SQLiteDataModule(largedbname, largedbname, largedbname, str(
+        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=10, collate_fn=my_collate, num_train_workers=4)
+    db.prepare_data()
+    db.setup('fit')    
+    dl = db.train_dataloader()
+    assert len(dl) == 10
+    i = dl.__iter__()
+    for _ in range(3):
+        i.__next__()
+    state = dl.state_dict()
+    print(state)
+    outs = set()
+    for batch in i:
+        for item in batch[0]:     
+            outs.add(item.item())
+    db = SQLiteDataModule(largedbname, largedbname, largedbname, str(
+        tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=10, collate_fn=my_collate, num_train_workers=4)
+    db.prepare_data()
+    db.setup('fit')
+    dl = db.train_dataloader()
+    dl.load_state_dict(state)
+    i = dl.__iter__()
+    for batch in i:
+        for item in batch[0]:
+            assert item.item() in outs
+            outs.remove(item.item())
+    assert len(outs) == 0
+

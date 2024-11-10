@@ -4,6 +4,7 @@ import random
 from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeVar, Generic, cast
 import torch
 import lightning.pytorch
+from torchdata.stateful_dataloader import StatefulDataLoader
 from torch.utils.data import Dataset, DataLoader
 import torch.utils.data
 import torch.utils.data.dataloader
@@ -286,7 +287,7 @@ class UnionMapDataset(Dataset[T_co], Generic[T_co]):
         return self._len
 
 
-class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
+class TypedStatefulDataLoader(Iterable[T_co], StatefulDataLoader[T_co], Generic[T_co]):
     pass
 
 
@@ -335,34 +336,34 @@ class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co
         self._predict_dataloader = None
         super().__init__()
 
-    def train_dataloader(self) -> TypedDataLoader[T2_co]:
+    def train_dataloader(self) -> TypedStatefulDataLoader[T2_co]:
         if self._train_dataloader is None:
             if self.train_dataset is None:
                 raise ValueError("Training dataset not available")
-            self._train_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_train_workers,
+            self._train_dataloader = cast(TypedStatefulDataLoader[T2_co], StatefulDataLoader(self.train_dataset, shuffle=True, batch_size=self.batch_size, num_workers=self.num_train_workers,
                                           persistent_workers=self.persistent_workers or self.num_train_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_train_workers > 0 else None))
         return self._train_dataloader
 
-    def val_dataloader(self) -> TypedDataLoader[T2_co]:
+    def val_dataloader(self) -> TypedStatefulDataLoader[T2_co]:
         if self._val_dataloader is None:
             if self.val_dataset is None:
                 raise ValueError("Validation dataset not available")
-            self._val_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_val_workers,
+            self._val_dataloader = cast(TypedStatefulDataLoader[T2_co], StatefulDataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_val_workers,
                                         persistent_workers=self.persistent_workers or self.num_val_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_val_workers > 0 else None))
         return self._val_dataloader
 
-    def test_dataloader(self) -> TypedDataLoader[T2_co]:
+    def test_dataloader(self) -> TypedStatefulDataLoader[T2_co]:
         if self._test_dataloader is None:
             if self.test_dataset is None:
                 raise ValueError("Test dataset not available")
-            self._test_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_test_workers,
+            self._test_dataloader = cast(TypedStatefulDataLoader[T2_co], StatefulDataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_test_workers,
                                          persistent_workers=self.persistent_workers or self.num_test_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory, prefetch_factor=self.prefetch_factor if self.num_test_workers > 0 else None))
         return self._test_dataloader
 
-    def predict_dataloader(self) -> TypedDataLoader[T2_co]:
+    def predict_dataloader(self) -> TypedStatefulDataLoader[T2_co]:
         if self._predict_dataloader is None:
             if self.predict_dataset is None:
                 raise ValueError("Predict dataset not available")
-            self._predict_dataloader = cast(TypedDataLoader[T2_co], DataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers,
+            self._predict_dataloader = cast(TypedStatefulDataLoader[T2_co], StatefulDataLoader(self.predict_dataset, batch_size=self.batch_size, num_workers=self.num_predict_workers,
                                             persistent_workers=self.persistent_workers or self.num_predict_workers > 0, collate_fn=self.collate_fn, pin_memory=self.pin_memory))
         return self._predict_dataloader

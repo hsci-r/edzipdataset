@@ -2596,6 +2596,32 @@ opt-einsum = ["opt-einsum (>=3.3)"]
 optree = ["optree (>=0.9.1)"]
 
 [[package]]
+name = "torchdata"
+version = "0.9.0"
+description = "Composable data loading modules for PyTorch"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "torchdata-0.9.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f3f3bb4d519e59a4c0fcb71d41c594ba2baf8a211fadb40a1a7780d7fb80faa5"},
+    {file = "torchdata-0.9.0-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:594f1c32934c44d699737d3444cbe6a6f3cecd51047469b19fb99c865bb03eb2"},
+    {file = "torchdata-0.9.0-cp310-cp310-win_amd64.whl", hash = "sha256:7c8dfdf2af1b3127b8dbd7072e503ae37cf6cc86e4d02fde6e49ac0d8109fd43"},
+    {file = "torchdata-0.9.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:79781f557feb97e2a8d54563a5b484b367d658108107e7b4bb2acf58df1765ad"},
+    {file = "torchdata-0.9.0-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:a0e20f1f9365e8ff8a6f207f6cbb41c56e300c027b2f96b68f3371a9a89446d0"},
+    {file = "torchdata-0.9.0-cp311-cp311-win_amd64.whl", hash = "sha256:f9c36cfd9fe86c9b4f61bdde8344be4312b84d7a4ffdf2e45e24d66d0198f5aa"},
+    {file = "torchdata-0.9.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:5aa08868ee14c1afae0d88d86398cf623d716ec030b8c66237c2be4fbf0932ea"},
+    {file = "torchdata-0.9.0-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:3b437e1305998efae3f0b6f46c71a5cb154c1661b98528238dad64b559203dfc"},
+    {file = "torchdata-0.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:ba0d2c6364576f3ee8a077dd1dbd0ce26d8e7b1bb4cb04282d0021dad989891f"},
+    {file = "torchdata-0.9.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:d0d9e32d63f4bc9ae780c1f956cd8b2dc1c8db34aa236dc174660d22c7a6b394"},
+    {file = "torchdata-0.9.0-cp39-cp39-manylinux1_x86_64.whl", hash = "sha256:19085d5db150ce1457ca19b64f5434d9d4ab1d266f6a89716a18852103bdfba5"},
+    {file = "torchdata-0.9.0-cp39-cp39-win_amd64.whl", hash = "sha256:435aac61ad043ce79e61edee8d24e8bffcf2c969cc72c3d8e6c2ba0c1796cd29"},
+]
+
+[package.dependencies]
+requests = "*"
+torch = ">=2"
+urllib3 = ">=1.25"
+
+[[package]]
 name = "torchmetrics"
 version = "1.4.0.post0"
 description = "PyTorch native Metrics"
@@ -2946,4 +2972,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<4"
-content-hash = "3e3959117eef5239fac60bad7b59dcc32c98cab2de19ebabc8acb43e118960be"
+content-hash = "7eafb5337b637df8624135558bcd476e328e992244aa5251b8b7e9ad51239480"
