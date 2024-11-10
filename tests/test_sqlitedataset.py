@@ -115,17 +115,18 @@ def test_dataloader_state_with_workers(largedbname: str, tmp_path):
     for _ in range(3):
         i.__next__()
     state = dl.state_dict()
-    print(state)
     outs = set()
     for batch in i:
         for item in batch[0]:     
             outs.add(item.item())
+    assert len(outs) == 70
     db = SQLiteDataModule(largedbname, largedbname, largedbname, str(
         tmp_path / "cache"), "test", "entry_number", "value, id", "id", batch_size=10, collate_fn=my_collate, num_train_workers=4)
     db.prepare_data()
     db.setup('fit')
     dl = db.train_dataloader()
     dl.load_state_dict(state)
+    assert len(dl) == 10
     i = dl.__iter__()
     for batch in i:
         for item in batch[0]:
