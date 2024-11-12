@@ -286,8 +286,10 @@ class UnionMapDataset(Dataset[T_co], Generic[T_co]):
     def __len__(self):
         return self._len
 
+class TypedDataLoader(Iterable[T_co], DataLoader[T_co], Generic[T_co]):
+    pass
 
-class TypedStatefulDataLoader(Iterable[T_co], StatefulDataLoader[T_co], Generic[T_co]):
+class TypedStatefulDataLoader(TypedDataLoader[T_co], StatefulDataLoader[T_co], Generic[T_co]):
     pass
 
 
