@@ -100,12 +100,8 @@ class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[Unpack[Ts], T_co, T
         self.train_transform = train_transform
         self.test_transform = test_transform
 
-    def prepare_data(self):
-        # download, IO, etc. Useful with shared filesystems
-        # only called on 1 GPU/TPU in distributed
-        super().prepare_data()
-
-        # Ensure sqlite databases are downloaded
+    def prepare_sqlite_databases(self):
+        """Ensure sqlite databases are downloaded"""
         cache_locally_if_remote(
             self.train_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir)
         cache_locally_if_remote(
@@ -114,7 +110,7 @@ class SQLiteDataModule(ABaseDataModule[T_co, T2_co], Generic[Unpack[Ts], T_co, T
             self.test_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir)
 
     def setup(self, stage: Literal['fit', 'validate', 'test', 'predict']):
-        super().setup(stage)
+        """Fulfil the requirements for a given stage"""
         if (stage == "fit") and self.train_dataset is None:
             self.train_dataset = self.train_transform(SQLiteDataset(cache_locally_if_remote(
                 self.train_sqlite_url, storage_options=self.storage_options, cache_dir=self.cache_dir),

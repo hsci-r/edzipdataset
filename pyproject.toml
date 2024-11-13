@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hscitorchutil"
-version = "0.2.14"
+version = "0.3.0"
 description = "HSCI research group utilities for pytorch (lightning)"
 authors = ["Eetu Mäkelä <eetu.makela@helsinki.fi>"]
 readme = "README.md"
@@ -20,7 +20,6 @@ pyyaml = ">=6.0.1"
 s3fs = ">=2023.12.2"
 tqdm = ">=4.66.1"
 multiprocessing-utils = ">=0.4"
-lightning = ">=2.1.2"
 morefs = {extras = ["asynclocalfs"], version = "^0.2.1"}
 hscifsspecutil = "^0.1.0"
 torchdata = "^0.9.0"

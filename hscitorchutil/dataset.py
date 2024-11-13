@@ -1,9 +1,8 @@
 import abc
 import bisect
 import random
-from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeVar, Generic, cast
+from typing import Any, Callable, Iterable, Optional, Sequence, TypeVar, Generic, cast
 import torch
-import lightning.pytorch
 from torchdata.stateful_dataloader import StatefulDataLoader
 from torch.utils.data import Dataset, DataLoader
 import torch.utils.data
@@ -306,7 +305,7 @@ def remove_nones_from_batch(batch: Sequence[T_co], collate_fn: Callable[[Any], A
     return ()
 
 
-class ABaseDataModule(lightning.pytorch.LightningDataModule, Generic[T_co, T2_co], abc.ABC):
+class ABaseDataModule(Generic[T_co, T2_co], abc.ABC):
     def __init__(self,
                  batch_size: int = 64,
                  num_train_workers: int = 0,
